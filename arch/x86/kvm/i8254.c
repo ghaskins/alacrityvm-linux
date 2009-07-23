@@ -601,13 +601,6 @@ struct kvm_pit *kvm_create_pit(struct kvm *kvm)
 	mutex_lock(&pit->pit_state.lock);
 	spin_lock_init(&pit->pit_state.inject_lock);
 
-	/* Initialize PIO device */
-	kvm_iodevice_init(&pit->dev, &pit_dev_ops);
-	kvm_io_bus_register_dev(&kvm->pio_bus, &pit->dev);
-
-	kvm_iodevice_init(&pit->speaker_dev, &speaker_dev_ops);
-	kvm_io_bus_register_dev(&kvm->pio_bus, &pit->speaker_dev);
-
 	kvm->arch.vpit = pit;
 	pit->kvm = kvm;
 
@@ -625,6 +618,12 @@ struct kvm_pit *kvm_create_pit(struct kvm *kvm)
 
 	pit->mask_notifier.func = pit_mask_notifer;
 	kvm_register_irq_mask_notifier(kvm, 0, &pit->mask_notifier);
+
+	kvm_iodevice_init(&pit->dev, &pit_dev_ops);
+	kvm_io_bus_register_dev(&kvm->pio_bus, &pit->dev);
+
+	kvm_iodevice_init(&pit->speaker_dev, &speaker_dev_ops);
+	kvm_io_bus_register_dev(&kvm->pio_bus, &pit->speaker_dev);
 
 	return pit;
 }
