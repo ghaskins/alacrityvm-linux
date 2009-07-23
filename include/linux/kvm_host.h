@@ -123,7 +123,6 @@ struct kvm_kernel_irq_routing_entry {
 };
 
 struct kvm {
-	struct mutex lock; /* protects the vcpus array and APIC accesses */
 	spinlock_t mmu_lock;
 	spinlock_t requests_lock;
 	struct rw_semaphore slots_lock;
@@ -133,6 +132,7 @@ struct kvm {
 					KVM_PRIVATE_MEM_SLOTS];
 	struct kvm_vcpu *vcpus[KVM_MAX_VCPUS];
 	struct list_head vm_list;
+	struct mutex lock;
 	struct kvm_io_bus mmio_bus;
 	struct kvm_io_bus pio_bus;
 #ifdef CONFIG_HAVE_KVM_EVENTFD
@@ -146,6 +146,7 @@ struct kvm {
 	struct kvm_coalesced_mmio_ring *coalesced_mmio_ring;
 #endif
 
+	struct mutex irq_lock;
 #ifdef CONFIG_HAVE_KVM_IRQCHIP
 	struct list_head irq_routing; /* of kvm_kernel_irq_routing_entry */
 	struct hlist_head mask_notifier_list;
