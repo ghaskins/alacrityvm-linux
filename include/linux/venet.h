@@ -37,8 +37,43 @@ struct venet_capabilities {
 	__u32 bits;
 };
 
-/* CAPABILITIES-GROUP 0 */
-/* #define VENET_CAP_FOO    0   (No capabilities defined yet, for now) */
+#define VENET_CAP_GROUP_SG 0
+
+/* CAPABILITIES-GROUP SG */
+#define VENET_CAP_SG     (1 << 0)
+#define VENET_CAP_TSO4   (1 << 1)
+#define VENET_CAP_TSO6   (1 << 2)
+#define VENET_CAP_ECN    (1 << 3)
+#define VENET_CAP_UFO    (1 << 4)
+
+struct venet_iov {
+	__u32 len;
+	__u64 ptr;
+};
+
+#define VENET_SG_FLAG_NEEDS_CSUM (1 << 0)
+#define VENET_SG_FLAG_GSO        (1 << 1)
+#define VENET_SG_FLAG_ECN        (1 << 2)
+
+struct venet_sg {
+	__u64            cookie;
+	__u32            flags;
+	__u32            len;     /* total length of all iovs */
+	struct {
+		__u16    start;	  /* csum starting position */
+		__u16    offset;  /* offset to place csum */
+	} csum;
+	struct {
+#define VENET_GSO_TYPE_TCPV4	0	/* IPv4 TCP (TSO) */
+#define VENET_GSO_TYPE_UDP	1	/* IPv4 UDP (UFO) */
+#define VENET_GSO_TYPE_TCPV6	2	/* IPv6 TCP */
+		__u8     type;
+		__u16    hdrlen;
+		__u16    size;
+	} gso;
+	__u32            count;   /* nr of iovs */
+	struct venet_iov iov[1];
+};
 
 #define VENET_FUNC_LINKUP   0
 #define VENET_FUNC_LINKDOWN 1
