@@ -200,4 +200,13 @@ config NLATTR
 config GENERIC_ATOMIC64
        bool
 
+config SHM_SIGNAL
+	boolean "SHM Signal - Generic shared-memory signaling mechanism"
+	default n
+	help
+	 Provides a shared-memory based signaling mechansim to indicate
+         memory-dirty notifications between two end-points.
+
+	 If unsure, say N
+
 endmenu
