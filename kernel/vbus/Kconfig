@@ -6,6 +6,7 @@ menuconfig VBUS
        bool "Virtual-Bus Containers"
        select CONFIGFS_FS
        select SHM_SIGNAL
+       select IOQ
        default n
        help
         Provides a mechansism for declaring virtual resource containers
@@ -16,3 +17,4 @@ menuconfig VBUS
 
 	If you plan on using this kernel as a VBUS backend, say Y.  If
 	unsure, say N
+

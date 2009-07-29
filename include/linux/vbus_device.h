@@ -102,6 +102,7 @@
 #include <linux/configfs.h>
 #include <linux/rbtree.h>
 #include <linux/shm_signal.h>
+#include <linux/ioq.h>
 #include <linux/vbus.h>
 #include <linux/kref.h>
 
@@ -434,5 +435,11 @@ static inline void vbus_connection_put(struct vbus_connection *conn)
 {
 	kref_put(&conn->kref, _vbus_connection_release);
 }
+
+/*
+ * device-side IOQ helper - dereferences device-shm as an IOQ
+ */
+int vbus_shm_ioq_attach(struct vbus_shm *shm, struct shm_signal *signal,
+			int maxcount, struct ioq **ioq);
 
 #endif /* _LINUX_VBUS_DEVICE_H */
