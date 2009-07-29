@@ -89,6 +89,7 @@ int vbus_device_interface_register(struct vbus_device *dev,
 {
 	int ret;
 	struct vbus_devshell *ds = to_devshell(dev->kobj);
+	struct vbus_event_devadd ev;
 
 	mutex_lock(&vbus->lock);
 
@@ -124,6 +125,14 @@ int vbus_device_interface_register(struct vbus_device *dev,
 	if (ret)
 		goto error;
 
+	ev.type = intf->type;
+	ev.id   = intf->id;
+
+	/* and let any clients know about the new device */
+	ret = raw_notifier_call_chain(&vbus->notifier, VBUS_EVENT_DEVADD, &ev);
+	if (ret < 0)
+		goto error;
+
 	mutex_unlock(&vbus->lock);
 
 	return 0;
@@ -144,6 +153,7 @@ int vbus_device_interface_unregister(struct vbus_device_interface *intf)
 
 	mutex_lock(&vbus->lock);
 	_interface_unregister(intf);
+	raw_notifier_call_chain(&vbus->notifier, VBUS_EVENT_DEVDROP, &intf->id);
 	mutex_unlock(&vbus->lock);
 
 	kobject_put(&intf->kobj);
@@ -346,6 +356,8 @@ int vbus_create(const char *name, struct vbus **bus)
 
 	_bus->next_id = 0;
 
+	RAW_INIT_NOTIFIER_HEAD(&_bus->notifier);
+
 	mutex_lock(&vbus_root.lock);
 
 	ret = map_add(&vbus_root.buses.map, &_bus->node);
@@ -357,6 +369,53 @@ int vbus_create(const char *name, struct vbus **bus)
 
 	return 0;
 }
+
+#define for_each_rbnode(node, root) \
+	for (node = rb_first(root); node != NULL; node = rb_next(node))
+
+int vbus_notifier_register(struct vbus *vbus, struct notifier_block *nb)
+{
+	int ret;
+	struct rb_node *node;
+
+	mutex_lock(&vbus->lock);
+
+	/*
+	 * resync the client for any devices we might already have
+	 */
+	for_each_rbnode(node, &vbus->devices.map.root) {
+		struct vbus_device_interface *intf = node_to_intf(node);
+		struct vbus_event_devadd ev = {
+			.type = intf->type,
+			.id   = intf->id,
+		};
+
+		ret = nb->notifier_call(nb, VBUS_EVENT_DEVADD, &ev);
+		if (ret & NOTIFY_STOP_MASK) {
+			mutex_unlock(&vbus->lock);
+			return -EPERM;
+		}
+	}
+
+	ret = raw_notifier_chain_register(&vbus->notifier, nb);
+
+	mutex_unlock(&vbus->lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(vbus_notifier_register);
+
+int vbus_notifier_unregister(struct vbus *vbus, struct notifier_block *nb)
+{
+	int ret;
+
+	mutex_lock(&vbus->lock);
+	ret = raw_notifier_chain_unregister(&vbus->notifier, nb);
+	mutex_unlock(&vbus->lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(vbus_notifier_unregister);
 
 static void devshell_release(struct kobject *kobj)
 {

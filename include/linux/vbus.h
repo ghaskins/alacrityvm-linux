@@ -29,6 +29,7 @@
 #include <linux/sched.h>
 #include <linux/rcupdate.h>
 #include <linux/vbus_device.h>
+#include <linux/notifier.h>
 
 struct vbus;
 struct task_struct;
@@ -136,6 +137,20 @@ static inline void task_vbus_disassociate(struct task_struct *p)
 		vbus_put(vbus);
 	}
 }
+
+enum {
+	VBUS_EVENT_DEVADD,
+	VBUS_EVENT_DEVDROP,
+};
+
+struct vbus_event_devadd {
+	const char   *type;
+	unsigned long id;
+};
+
+int vbus_notifier_register(struct vbus *vbus, struct notifier_block *nb);
+int vbus_notifier_unregister(struct vbus *vbus, struct notifier_block *nb);
+
 
 #else /* CONFIG_VBUS */
 
