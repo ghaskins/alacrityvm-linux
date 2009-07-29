@@ -2041,7 +2041,6 @@ source "drivers/vbus/Kconfig"
 
 endmenu
 
-
 menu "Executable file formats / Emulations"
 
 source "fs/Kconfig.binfmt"
@@ -2095,5 +2094,7 @@ source "security/Kconfig"
 source "crypto/Kconfig"
 
 source "arch/x86/kvm/Kconfig"
+
+source "kernel/vbus/Kconfig"
 
 source "lib/Kconfig"

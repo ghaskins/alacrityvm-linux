@@ -81,6 +81,7 @@
 #include <linux/elf.h>
 #include <linux/pid_namespace.h>
 #include <linux/fs_struct.h>
+#include <linux/vbus.h>
 #include "internal.h"
 
 /* NOTE:
@@ -1063,6 +1064,98 @@ static const struct file_operations proc_oom_adjust_operations = {
 	.read		= oom_adjust_read,
 	.write		= oom_adjust_write,
 };
+
+#ifdef CONFIG_VBUS
+
+static ssize_t vbus_read(struct file *file, char __user *buf,
+			 size_t count, loff_t *ppos)
+{
+	struct task_struct *task = get_proc_task(file->f_path.dentry->d_inode);
+	struct vbus *vbus;
+	const char *name;
+	char buffer[256];
+	size_t len;
+
+	if (!task)
+		return -ESRCH;
+
+	vbus = task_vbus_get(task);
+
+	put_task_struct(task);
+
+	name = vbus_name(vbus);
+
+	len = snprintf(buffer, sizeof(buffer), "%s\n", name ? name : "<none>");
+
+	vbus_put(vbus);
+
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static ssize_t vbus_write(struct file *file, const char __user *buf,
+			  size_t count, loff_t *ppos)
+{
+	struct task_struct *task;
+	struct vbus *vbus = NULL;
+	char buffer[256];
+	int disable = 0;
+
+	memset(buffer, 0, sizeof(buffer));
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	if (buffer[count-1] == '\n')
+		buffer[count-1] = 0;
+
+	task = get_proc_task(file->f_path.dentry->d_inode);
+	if (!task)
+		return -ESRCH;
+
+	if (!capable(CAP_SYS_ADMIN)) {
+		put_task_struct(task);
+		return -EACCES;
+	}
+
+	if (strcmp(buffer, "0") == 0)
+		disable = 1;
+	else
+		vbus = vbus_find(buffer);
+
+	if (disable || vbus)
+		task_vbus_disassociate(task);
+
+	if (vbus) {
+		int ret = vbus_associate(vbus, task);
+
+		if (ret < 0)
+			printk(KERN_ERR \
+			       "vbus: could not associate %s/%d with bus %s",
+			       task->comm, task->pid, vbus_name(vbus));
+		else
+			rcu_assign_pointer(task->vbus, vbus);
+
+		vbus_put(vbus); /* Counter the vbus_find() */
+	} else if (!disable) {
+		put_task_struct(task);
+		return -ENOENT;
+	}
+
+	put_task_struct(task);
+
+	if (count == sizeof(buffer)-1)
+		return -EIO;
+
+	return count;
+}
+
+static const struct file_operations proc_vbus_operations = {
+	.read		= vbus_read,
+	.write		= vbus_write,
+};
+
+#endif /* CONFIG_VBUS */
 
 #ifdef CONFIG_AUDITSYSCALL
 #define TMPBUFLEN 21
@@ -2560,6 +2653,9 @@ static const struct pid_entry tgid_base_stuff[] = {
 #endif
 #ifdef CONFIG_TASK_IO_ACCOUNTING
 	INF("io",	S_IRUGO, proc_tgid_io_accounting),
+#endif
+#ifdef CONFIG_VBUS
+	REG("vbus", S_IRUGO|S_IWUSR, proc_vbus_operations),
 #endif
 };
 
