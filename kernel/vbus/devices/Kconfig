@@ -1,0 +1,17 @@
+#
+# Virtual-Bus (VBus) configuration
+#
+
+config VBUS_VENETTAP
+       tristate "Virtual-Bus Ethernet Tap Device"
+       depends on VBUS_DEVICES
+       default n
+       help
+        Provides a virtual ethernet adapter to a vbus, which in turn
+        manifests itself as a standard netif based adapter to the
+	kernel.  It can be used similarly to a "tuntap" device,
+        except that the char-dev transport is replaced with a vbus/ioq
+        interface.
+
+	If unsure, say N
+

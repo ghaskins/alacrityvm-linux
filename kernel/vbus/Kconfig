@@ -18,3 +18,14 @@ menuconfig VBUS
 	If you plan on using this kernel as a VBUS backend, say Y.  If
 	unsure, say N
 
+config VBUS_DEVICES
+       bool "Virtual-Bus Devices"
+       depends on VBUS
+       default n
+       help
+         Provides device-class modules for instantiation on a virtual-bus
+
+	 If unsure, say N
+
+source "kernel/vbus/devices/Kconfig"
+
