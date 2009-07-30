@@ -1233,6 +1233,39 @@ host_mac_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 static struct vbus_device_attribute attr_hmac =
 	__ATTR_RO(host_mac);
 
+
+static ssize_t
+cmac_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
+	      const char *buf, size_t count)
+{
+	struct venettap *priv = vdev_to_priv(dev);
+	const char *pbuf = buf;
+	unsigned int uc;
+	int i;
+
+	/*
+	 * Format 00:11:22:33:44:55
+	 */
+	if (count != 18)
+		return -EINVAL;
+
+	for (i = 2; i < 17; i += 3) {
+		if (pbuf[i] != ':')
+			return -EINVAL;
+	}
+
+	if (priv->vbus.opened)
+		return -EINVAL;
+
+	for (i = 0; i < ETH_ALEN; i++) {
+		sscanf(pbuf, "%x", &uc);
+		pbuf = pbuf + 3;
+		priv->cmac[i] = (u8)uc;
+	}
+
+	return count;
+}
+
 static ssize_t
 client_mac_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	 char *buf)
@@ -1243,7 +1276,7 @@ client_mac_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 }
 
 static struct vbus_device_attribute attr_cmac =
-	__ATTR_RO(client_mac);
+	__ATTR(client_mac, S_IRUGO | S_IWUSR, client_mac_show, cmac_store);
 
 static ssize_t
 enabled_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
