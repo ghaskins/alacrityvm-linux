@@ -101,7 +101,7 @@ int kvm_coalesced_mmio_init(struct kvm *kvm)
 	kvm_iodevice_init(&dev->dev, &coalesced_mmio_ops);
 	dev->kvm = kvm;
 	kvm->coalesced_mmio_dev = dev;
-	kvm_io_bus_register_dev(&kvm->mmio_bus, &dev->dev);
+	kvm_io_bus_register_dev(kvm, &kvm->mmio_bus, &dev->dev);
 
 	return 0;
 }
@@ -114,16 +114,16 @@ int kvm_vm_ioctl_register_coalesced_mmio(struct kvm *kvm,
 	if (dev == NULL)
 		return -EINVAL;
 
-	mutex_lock(&kvm->lock);
+	down_write(&kvm->slots_lock);
 	if (dev->nb_zones >= KVM_COALESCED_MMIO_ZONE_MAX) {
-		mutex_unlock(&kvm->lock);
+		up_write(&kvm->slots_lock);
 		return -ENOBUFS;
 	}
 
 	dev->zone[dev->nb_zones] = *zone;
 	dev->nb_zones++;
 
-	mutex_unlock(&kvm->lock);
+	up_write(&kvm->slots_lock);
 	return 0;
 }
 
@@ -137,7 +137,7 @@ int kvm_vm_ioctl_unregister_coalesced_mmio(struct kvm *kvm,
 	if (dev == NULL)
 		return -EINVAL;
 
-	mutex_lock(&kvm->lock);
+	down_write(&kvm->slots_lock);
 
 	i = dev->nb_zones;
 	while(i) {
@@ -155,7 +155,7 @@ int kvm_vm_ioctl_unregister_coalesced_mmio(struct kvm *kvm,
 		i--;
 	}
 
-	mutex_unlock(&kvm->lock);
+	up_write(&kvm->slots_lock);
 
 	return 0;
 }
