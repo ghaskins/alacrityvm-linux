@@ -988,7 +988,7 @@ static struct kvm *kvm_create_vm(void)
 	spin_lock_init(&kvm->mmu_lock);
 	spin_lock_init(&kvm->requests_lock);
 	kvm_io_bus_init(&kvm->pio_bus);
-	kvm_irqfd_init(kvm);
+	kvm_eventfd_init(kvm);
 	mutex_init(&kvm->lock);
 	mutex_init(&kvm->irq_lock);
 	kvm_io_bus_init(&kvm->mmio_bus);
@@ -2235,6 +2235,15 @@ static long kvm_vm_ioctl(struct file *filp,
 		if (copy_from_user(&data, argp, sizeof data))
 			goto out;
 		r = kvm_irqfd(kvm, data.fd, data.gsi, data.flags);
+		break;
+	}
+	case KVM_IOEVENTFD: {
+		struct kvm_ioeventfd data;
+
+		r = -EFAULT;
+		if (copy_from_user(&data, argp, sizeof data))
+			goto out;
+		r = kvm_ioeventfd(kvm, &data);
 		break;
 	}
 	default:
