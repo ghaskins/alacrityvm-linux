@@ -582,6 +582,7 @@ static const struct kvm_io_device_ops speaker_dev_ops = {
 	.in_range = speaker_in_range,
 };
 
+/* Caller must have writers lock on slots_lock */
 struct kvm_pit *kvm_create_pit(struct kvm *kvm)
 {
 	struct kvm_pit *pit;
@@ -620,10 +621,10 @@ struct kvm_pit *kvm_create_pit(struct kvm *kvm)
 	kvm_register_irq_mask_notifier(kvm, 0, &pit->mask_notifier);
 
 	kvm_iodevice_init(&pit->dev, &pit_dev_ops);
-	kvm_io_bus_register_dev(&kvm->pio_bus, &pit->dev);
+	__kvm_io_bus_register_dev(&kvm->pio_bus, &pit->dev);
 
 	kvm_iodevice_init(&pit->speaker_dev, &speaker_dev_ops);
-	kvm_io_bus_register_dev(&kvm->pio_bus, &pit->speaker_dev);
+	__kvm_io_bus_register_dev(&kvm->pio_bus, &pit->speaker_dev);
 
 	return pit;
 }
