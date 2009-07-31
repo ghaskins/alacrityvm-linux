@@ -43,6 +43,7 @@
 #include <linux/swap.h>
 #include <linux/bitops.h>
 #include <linux/spinlock.h>
+#include <linux/kvm_xinterface.h>
 
 #include <asm/processor.h>
 #include <asm/io.h>
@@ -2781,3 +2782,26 @@ void kvm_exit(void)
 	__free_page(bad_page);
 }
 EXPORT_SYMBOL_GPL(kvm_exit);
+
+struct kvm_xinterface *
+kvm_xinterface_bind(int fd)
+{
+	struct kvm_xinterface *intf;
+	struct file *file;
+
+	file = fget(fd);
+	if (!file)
+		return ERR_PTR(-EBADF);
+
+	if (file->f_op != &kvm_vm_fops) {
+		fput(file);
+		return ERR_PTR(-EINVAL);
+	}
+
+	intf = kvm_xinterface_alloc(file->private_data, file->f_op->owner);
+
+	fput(file);
+
+	return intf;
+}
+EXPORT_SYMBOL_GPL(kvm_xinterface_bind);

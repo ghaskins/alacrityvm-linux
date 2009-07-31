@@ -331,6 +331,9 @@ int kvm_cpu_has_interrupt(struct kvm_vcpu *v);
 int kvm_cpu_has_pending_timer(struct kvm_vcpu *vcpu);
 void kvm_vcpu_kick(struct kvm_vcpu *vcpu);
 
+struct kvm_xinterface *
+kvm_xinterface_alloc(struct kvm *kvm, struct module *owner);
+
 int kvm_is_mmio_pfn(pfn_t pfn);
 
 struct kvm_irq_ack_notifier {
