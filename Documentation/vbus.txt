@@ -1,0 +1,385 @@
+
+Virtual-Bus:
+======================
+Author: Gregory Haskins <ghaskins@novell.com>
+
+
+
+
+What is it?
+--------------------
+
+Virtual-Bus is a kernel based IO resource container technology.  It is modeled
+on a concept similar to the Linux Device-Model (LDM), where we have buses,
+devices, and drivers as the primary actors.  However, VBUS has several
+distinctions when contrasted with LDM:
+
+  1) "Busses" in LDM are relatively static and global to the kernel (e.g.
+     "PCI", "USB", etc).  VBUS buses are arbitrarily created and destroyed
+     dynamically, and are not globally visible.  Instead they are defined as
+     visible only to a specific subset of the system (the contained context).
+  2) "Devices" in LDM are typically tangible physical (or sometimes logical)
+     devices.  VBUS devices are purely software abstractions (which may or
+     may not have one or more physical devices behind them).  Devices may
+     also be arbitrarily created or destroyed by software/administrative action
+     as opposed to by a hardware discovery mechanism.
+  3) "Drivers" in LDM sit within the same kernel context as the busses and
+     devices they interact with.  VBUS drivers live in a foreign
+     context (such as userspace, or a virtual-machine guest).
+
+The idea is that a vbus is created to contain access to some IO services.
+Virtual devices are then instantiated and linked to a bus to grant access to
+drivers actively present on the bus.  Drivers will only have visibility to
+devices present on their respective bus, and nothing else.
+
+Virtual devices are defined by modules which register a deviceclass with the
+system.  A deviceclass simply represents a type of device that _may_ be
+instantiated into a device, should an administrator wish to do so.  Once
+this has happened, the device may be associated with one or more buses where
+it will become visible to all clients of those respective buses.
+
+Why do we need this?
+----------------------
+
+There are various reasons why such a construct may be useful.  One of the
+most interesting use cases is for virtualization, such as KVM.  Hypervisors
+today provide virtualized IO resources to a guest, but this is often at a cost
+in both latency and throughput compared to bare metal performance.  Utilizing
+para-virtual resources instead of emulated devices helps to mitigate this
+penalty, but even these techniques to date have not fully realized the
+potential of the underlying bare-metal hardware.
+
+Some of the performance differential is unavoidable just given the extra
+processing that occurs due to the deeper stack (guest+host).  However, some of
+this overhead is a direct result of the rather indirect path most hypervisors
+use to route IO.  For instance, KVM uses PIO faults from the guest to trigger
+a guest->host-kernel->host-userspace->host-kernel sequence of events.
+Contrast this to a typical userspace application on the host which must only
+traverse app->kernel for most IO.
+
+The fact is that the linux kernel is already great at managing access to IO
+resources.  Therefore, if you have a hypervisor that is based on the linux
+kernel, is there some way that we can allow the hypervisor to manage IO
+directly instead of forcing this convoluted path?
+
+The short answer is: "not yet" ;)
+
+In order to use such a concept, we need some new facilties.  For one, we
+need to be able to define containers with their corresponding access-control so
+that guests do not have unmitigated access to anything they wish.  Second,
+we also need to define some forms of memory access that is uniform in the face
+of various clients (e.g. "copy_to_user()" cannot be assumed to work for, say,
+a KVM vcpu context).  Lastly, we need to provide access to these resources in
+a way that makes sense for the application, such as asynchronous communication
+paths and minimizing context switches.
+
+So we introduce VBUS as a framework to provide such facilities.  The net
+result is a *substantial* reduction in IO overhead, even when compared to
+state of the art para-virtualization techniques (such as virtio-net).
+
+How do I use it?
+------------------------
+
+There are two components to utilizing a virtual-bus.  One is the
+administrative function (creating and configuring a bus and its devices).  The
+other is the consumption of the resources on the bus by a client (e.g. a
+virtual machine, or a userspace application).  The former occurs on the host
+kernel by means of interacting with various special filesystems (e.g. sysfs,
+configfs, etc).  The latter occurs by means of a "vbus connector" which must
+be developed specifically to bridge a particular environment.  To date, we
+have developed such connectors for host-userspace and kvm-guests.  Conceivably
+we could develop other connectors as needs arise (e.g. lguest, xen,
+guest-userspace, etc).  This document deals with the administrative interface.
+Details about developing a connector are out of scope for this document.
+
+Interacting with vbus
+------------------------
+
+The first step is to enable virtual-bus support (CONFIG_VBUS) as well as any
+desired vbus-device modules (e.g. CONFIG_VBUS_VENETTAP), and ensure that your
+environment mounts both sysfs and configfs somewhere in the filesystem.  This
+document will assume they are mounted to /sys and /config, respectively.
+
+VBUS will create a top-level directory "vbus" in each of the two respective
+filesystems.  At boot-up, they will look like the following:
+
+/sys/vbus/
+|-- deviceclass
+|-- devices
+|-- instances
+`-- version
+
+/config/vbus/
+|-- devices
+`-- instances
+
+Following their respective roles, /config/vbus is for userspace to manage the
+lifetime of some number of objects/attributes.  This is in contrast to
+/sys/vbus which is a reflection of objects managed by the kernel.  It is
+assumed the reader is already familiar with these two facilities, so we will
+not go into depth about their general operation.  Suffice to say that vbus
+consists of objects that are managed both by userspace and the kernel.
+Modification of objects via /config/vbus will typically be reflected in the
+/sys/vbus area.
+
+It all starts with a deviceclass
+--------------------------------
+
+Before you can do anything useful with vbus, you need some registered
+deviceclasses.  A deviceclass provides the implementation of a specific type
+of virtual device.  A deviceclass will typically be registered by loading a
+kernel-module.  Once loaded, the available device types are enumerated under
+/sys/vbus/deviceclass.  For example, we will load our "venet-tap" module,
+which provides network services:
+
+# modprobe venet-tap
+# tree /sys/vbus
+/sys/vbus
+|-- deviceclass
+|   `-- venet-tap
+|-- devices
+|-- instances
+`-- version
+
+An administrative agent should be able to enumerate /sys/vbus/deviceclass to
+determine what services are available on a given platform.
+
+Create the container
+-------------------
+
+The next step is to create a new container.  In vbus, this comes in the form
+of a vbus-instance and it is created by a simple "mkdir" in the
+/config/vbus/instances area.  The only requirement is that the instance is
+given a host-wide unique name.  This may be some kind of association to the
+application (e.g. the unique VM GUID) or it can be arbitrary.  For the
+purposes of example, we will let $(uuidgen) generate a random UUID for us.
+
+# mkdir /config/vbus/instances/$(uuidgen)
+# tree /sys/vbus/
+/sys/vbus/
+|-- deviceclass
+|   `-- venet-tap
+|-- devices
+|-- instances
+|   `-- beb4df8f-7483-4028-b3f7-767512e2a18c
+|       |-- devices
+|       `-- members
+`-- version
+
+So we can see that we have now created a vbus called
+
+               "beb4df8f-7483-4028-b3f7-767512e2a18c"
+
+in the /config area, and it was immediately reflected in the
+/sys/vbus/instances area as well (with a few subobjects of its own: "devices"
+and "members").  The "devices" object denotes any devices that are present on
+the bus (in this case: none).  Likewise, "members" denotes the pids of any
+tasks that are members of the bus (in this case: none).  We will come back to
+this later.  For now, we move on to the next step
+
+Create a device instance
+------------------------
+
+Devices are instantiated by again utilizing the /config/vbus configfs area.
+They are represented as root-level objects under /config/vbus/devices as
+opposed to bus subordinate objects specifically to allow greater flexibility
+in the association of a device.  For instance, it may be desirable to have
+a single device that spans multiple VMs (consider an ethernet switch, or
+a shared disk for a cluster).  Therefore, device lifecycles are managed by
+creating/deleting objects in /config/vbus/devices.
+
+Note: Creating a device instance is actually a two step process:  We need to
+give the device instance a unique name, and we also need to give it a specific
+device type.  It is hard to express both parameters using standard filesystem
+operations like mkdir, so the design decision was made to require performing
+the operation in two steps.
+
+Our first step is to create a unique instance.  We will again utilize
+$(uuidgen) to yield an arbitrary name.  Any name will suffice as long as it is
+unqie on this particular host.
+
+# mkdir /config/vbus/devices/$(uuidgen)
+# tree /sys/vbus
+/sys/vbus
+|-- deviceclass
+|   `-- venet-tap
+|-- devices
+|   `-- 6a1aff24-5dc0-4aea-9c35-435daef90e55
+|       `-- interfaces
+|-- instances
+|   `-- beb4df8f-7483-4028-b3f7-767512e2a18c
+|       |-- devices
+|       `-- members
+`-- version
+
+At this point we have created a partial instance, since we have not yet
+assigned a type to the device.  Even so, we can see that some state has
+changed under /sys/vbus/devices.  We now have an instance named
+
+	      	 6a1aff24-5dc0-4aea-9c35-435daef90e55
+
+and it has a single subordinate object: "interfaces".  This object in
+particular is provided by the infrastructure, though do note that a
+deviceclass may also provide its own attributes/objects once it is created.
+
+We will go ahead and give this device a type to complete its construction.  We
+do this by setting the /config/vbus/devices/$devname/type attribute with a
+valid deviceclass type:
+
+# echo foo > /config/vbus/devices/6a1aff24-5dc0-4aea-9c35-435daef90e55/type
+bash: echo: write error: No such file or directory
+
+Oops!  What happened?  "foo" is not a valid deviceclass.  We need to consult
+the /sys/vbus/deviceclass area to find out what our options are:
+
+# tree /sys/vbus/deviceclass/
+/sys/vbus/deviceclass/
+`-- venet-tap
+
+Lets try again:
+
+# echo venet-tap > /config/vbus/devices/6a1aff24-5dc0-4aea-9c35-435daef90e55/type
+# tree /sys/vbus/
+/sys/vbus/
+|-- deviceclass
+|   `-- venet-tap
+|-- devices
+|   `-- 6a1aff24-5dc0-4aea-9c35-435daef90e55
+|       |-- class -> ../../deviceclass/venet-tap
+|       |-- client_mac
+|       |-- enabled
+|       |-- host_mac
+|       |-- ifname
+|       `-- interfaces
+|-- instances
+|   `-- beb4df8f-7483-4028-b3f7-767512e2a18c
+|       |-- devices
+|       `-- members
+`-- version
+
+Ok, that looks better.  And note that /sys/vbus/devices now has some more
+subordinate objects.  Most of those were registered when the venet-tap
+deviceclass was given a chance to create an instance of itself.  Those
+attributes are a property of the venet-tap and therefore are out of scope
+for this document.  Please see the documentation that accompanies a particular
+module for more details.
+
+Put the device on the bus
+-------------------------
+
+The next administrative step is to associate our new device with our bus.
+This is accomplished using a symbolic link from the bus instance to our device
+instance.
+
+ln -s /config/vbus/devices/6a1aff24-5dc0-4aea-9c35-435daef90e55/ /config/vbus/instances/beb4df8f-7483-4028-b3f7-767512e2a18c/
+# tree /sys/vbus/
+/sys/vbus/
+|-- deviceclass
+|   `-- venet-tap
+|-- devices
+|   `-- 6a1aff24-5dc0-4aea-9c35-435daef90e55
+|       |-- class -> ../../deviceclass/venet-tap
+|       |-- client_mac
+|       |-- enabled
+|       |-- host_mac
+|       |-- ifname
+|       `-- interfaces
+|           `-- 0 -> ../../../instances/beb4df8f-7483-4028-b3f7-767512e2a18c/devices/0
+|-- instances
+|   `-- beb4df8f-7483-4028-b3f7-767512e2a18c
+|       |-- devices
+|       |   `-- 0
+|       |       |-- device -> ../../../../devices/6a1aff24-5dc0-4aea-9c35-435daef90e55
+|       |       `-- type
+|       `-- members
+`-- version
+
+We can now see that the device indicates that it has an interface registered
+to a bus:
+
+/sys/vbus/devices/6a1aff24-5dc0-4aea-9c35-435daef90e55/interfaces/
+`-- 0 -> ../../../instances/beb4df8f-7483-4028-b3f7-767512e2a18c/devices/0
+
+Likewise, we can see that the bus has a device listed (id = "0"):
+
+/sys/vbus/instances/beb4df8f-7483-4028-b3f7-767512e2a18c/devices/
+`-- 0
+    |-- device -> ../../../../devices/6a1aff24-5dc0-4aea-9c35-435daef90e55
+    `-- type
+
+At this point, our container is ready for use.  However, it currently has 0
+members, so lets fix that
+
+Add some members
+--------------------
+
+Membership is controlled by an attribute: /proc/$pid/vbus.  A pid can only be
+a member of one (or zero) busses at a time.  To establish membership, we set
+the name of the bus, like so:
+
+# echo beb4df8f-7483-4028-b3f7-767512e2a18c > /proc/self/vbus
+# tree /sys/vbus/
+/sys/vbus/
+|-- deviceclass
+|   `-- venet-tap
+|-- devices
+|   `-- 6a1aff24-5dc0-4aea-9c35-435daef90e55
+|       |-- class -> ../../deviceclass/venet-tap
+|       |-- client_mac
+|       |-- enabled
+|       |-- host_mac
+|       |-- ifname
+|       `-- interfaces
+|           `-- 0 -> ../../../instances/beb4df8f-7483-4028-b3f7-767512e2a18c/devices/0
+|-- instances
+|   `-- beb4df8f-7483-4028-b3f7-767512e2a18c
+|       |-- devices
+|       |   `-- 0
+|       |       |-- device -> ../../../../devices/6a1aff24-5dc0-4aea-9c35-435daef90e55
+|       |       `-- type
+|       `-- members
+|           |-- 4382
+|           `-- 4588
+`-- version
+
+Woah!  Why are there two members?  VBUS membership is inherited by forked
+tasks.  Therefore 4382 is the pid of our shell (which we set via /proc/self),
+and 4588 is the pid of the forked/exec'ed "tree" process.  This property can
+be useful for having things like qemu set up the bus and then forking each
+vcpu which will inherit access.
+
+At this point, we are ready to roll.  Pid 4382 has access to a virtual-bus
+namespace with one device, id=0.  Its type is:
+
+# cat /sys/vbus/instances/beb4df8f-7483-4028-b3f7-767512e2a18c/devices/0/type
+virtual-ethernet
+
+"virtual-ethernet"?  Why is it not "venet-tap"?  Device-classes are allowed to
+register their interfaces under an id that is not required to be the same as
+their deviceclass.  This supports device polymorphism.   For instance,
+consider that an interface "virtual-ethernet" may provide basic 802.x packet
+exchange.  However, we could have various implementations of a device that
+supports the 802.x interface, while having various implementations behind
+them.
+
+For instance, "venet-tap" might act like a tuntap module, while
+"venet-loopback" would loop packets back and "venet-switch" would form a
+layer-2 domain among the participating guests.  All three modules would
+presumably support the same basic 802.x interface, yet all three have
+completely different implementations.
+
+Drivers on this particular bus would see this instance id=0 as a type
+"virtual-ethernet" even though the underlying implementation happens to be a
+tap device.  This means a single driver that supports the protocol advertised
+by the "virtual-ethernet" type would be able to support the plethera of
+available device types that we may wish to create.
+
+Teardown:
+---------------
+
+We can descontruct a vbus container doing pretty much the opposite of what we
+did to create it.  Echo "0" into /proc/self/vbus, rm the symlink between the
+bus and device, and rmdir the bus and device objects.  Once that is done, we
+can even rmmod the venet-tap module.  Note that the infrastructure will
+maintain a module-ref while it is configured in a container, so be sure to
+completely tear down the vbus/device before trying this.

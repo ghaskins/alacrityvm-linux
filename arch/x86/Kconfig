@@ -2037,8 +2037,9 @@ source "drivers/pcmcia/Kconfig"
 
 source "drivers/pci/hotplug/Kconfig"
 
-endmenu
+source "drivers/vbus/Kconfig"
 
+endmenu
 
 menu "Executable file formats / Emulations"
 
@@ -2093,5 +2094,7 @@ source "security/Kconfig"
 source "crypto/Kconfig"
 
 source "arch/x86/kvm/Kconfig"
+
+source "kernel/vbus/Kconfig"
 
 source "lib/Kconfig"

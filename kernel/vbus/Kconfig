@@ -1,0 +1,31 @@
+#
+# Virtual-Bus (VBus) configuration
+#
+
+menuconfig VBUS
+       bool "Virtual-Bus Containers"
+       select CONFIGFS_FS
+       select SHM_SIGNAL
+       select IOQ
+       default n
+       help
+        Provides a mechansism for declaring virtual resource containers
+	and virtual-devices within those containers.  These devices may
+	then be accessed by any context that cohabitates the same
+	container, providing direct host-kernel access in a controlled
+	manner.
+
+	If you plan on using this kernel as a VBUS backend, say Y.  If
+	unsure, say N
+
+config VBUS_DEVICES
+       bool "Virtual-Bus Devices"
+       depends on VBUS
+       default n
+       help
+         Provides device-class modules for instantiation on a virtual-bus
+
+	 If unsure, say N
+
+source "kernel/vbus/devices/Kconfig"
+

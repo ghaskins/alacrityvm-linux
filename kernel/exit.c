@@ -49,6 +49,7 @@
 #include <linux/init_task.h>
 #include <linux/perf_counter.h>
 #include <trace/events/sched.h>
+#include <linux/vbus.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -965,6 +966,7 @@ NORET_TYPE void do_exit(long code)
 	check_stack_usage();
 	exit_thread();
 	cgroup_exit(tsk, 1);
+	task_vbus_disassociate(tsk);
 
 	if (group_dead && tsk->signal->leader)
 		disassociate_ctty(1);
