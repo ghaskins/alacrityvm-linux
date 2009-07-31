@@ -33,6 +33,7 @@ struct file *eventfd_fget(int fd);
 struct eventfd_ctx *eventfd_ctx_fdget(int fd);
 struct eventfd_ctx *eventfd_ctx_fileget(struct file *file);
 int eventfd_signal(struct eventfd_ctx *ctx, int n);
+struct file *eventfd_file_create(unsigned int count, int flags);
 
 #else /* CONFIG_EVENTFD */
 
@@ -53,6 +54,11 @@ static inline int eventfd_signal(struct eventfd_ctx *ctx, int n)
 static inline void eventfd_ctx_put(struct eventfd_ctx *ctx)
 {
 
+}
+
+struct file *eventfd_file_create(unsigned int count, int flags)
+{
+	ERR_PTR(-ENOSYS);
 }
 
 #endif

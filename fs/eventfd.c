@@ -298,9 +298,9 @@ struct eventfd_ctx *eventfd_ctx_fileget(struct file *file)
 }
 EXPORT_SYMBOL_GPL(eventfd_ctx_fileget);
 
-SYSCALL_DEFINE2(eventfd2, unsigned int, count, int, flags)
+struct file *eventfd_file_create(unsigned int count, int flags)
 {
-	int fd;
+	struct file *file;
 	struct eventfd_ctx *ctx;
 
 	/* Check the EFD_* constants for consistency.  */
@@ -308,26 +308,49 @@ SYSCALL_DEFINE2(eventfd2, unsigned int, count, int, flags)
 	BUILD_BUG_ON(EFD_NONBLOCK != O_NONBLOCK);
 
 	if (flags & ~EFD_FLAGS_SET)
-		return -EINVAL;
+		return ERR_PTR(-EINVAL);
 
 	ctx = kmalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 
 	kref_init(&ctx->kref);
 	init_waitqueue_head(&ctx->wqh);
 	ctx->count = count;
 	ctx->flags = flags;
 
-	/*
-	 * When we call this, the initialization must be complete, since
-	 * anon_inode_getfd() will install the fd.
-	 */
-	fd = anon_inode_getfd("[eventfd]", &eventfd_fops, ctx,
-			      flags & EFD_SHARED_FCNTL_FLAGS);
-	if (fd < 0)
+	file = anon_inode_getfile("[eventfd]", &eventfd_fops, ctx,
+				  flags & EFD_SHARED_FCNTL_FLAGS);
+	if (IS_ERR(file))
 		kfree(ctx);
+
+	return file;
+}
+EXPORT_SYMBOL_GPL(eventfd_file_create);
+
+SYSCALL_DEFINE2(eventfd2, unsigned int, count, int, flags)
+{
+	int fd, error;
+	struct file *file;
+
+	error = get_unused_fd_flags(flags & EFD_SHARED_FCNTL_FLAGS);
+	if (error < 0)
+		return error;
+	fd = error;
+
+	file = eventfd_file_create(count, flags);
+	if (IS_ERR(file)) {
+		error = PTR_ERR(file);
+		goto err_put_unused_fd;
+	}
+	fd_install(fd, file);
+
 	return fd;
+
+err_put_unused_fd:
+	put_unused_fd(fd);
+
+	return error;
 }
 
 SYSCALL_DEFINE1(eventfd, unsigned int, count)
