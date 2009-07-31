@@ -38,7 +38,8 @@ struct kvm_userspace_memory_region {
 };
 
 /* for kvm_memory_region::flags */
-#define KVM_MEM_LOG_DIRTY_PAGES  1UL
+#define KVM_MEM_SLOT_INITIALIZED 1UL
+#define KVM_MEM_LOG_DIRTY_PAGES  2UL
 
 
 /* for KVM_IRQ_LINE */

@@ -1117,10 +1117,20 @@ int __kvm_set_memory_region(struct kvm *kvm,
 	base_gfn = mem->guest_phys_addr >> PAGE_SHIFT;
 	npages = mem->memory_size >> PAGE_SHIFT;
 
+	if (atomic_read(&memslot->refs)) {
+		WARN_ON_ONCE(1);
+		return -EBUSY;
+	}
+
 	if (!npages)
 		mem->flags &= ~KVM_MEM_LOG_DIRTY_PAGES;
 
 	new = old = *memslot;
+
+	if (!(new.flags & KVM_MEM_SLOT_INITIALIZED)) {
+		atomic_set(&new.refs, 0);
+		new.flags |= KVM_MEM_SLOT_INITIALIZED;
+	}
 
 	new.base_gfn = base_gfn;
 	new.npages = npages;

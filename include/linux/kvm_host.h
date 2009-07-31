@@ -115,6 +115,7 @@ struct kvm_memory_slot {
 	} *lpage_info;
 	unsigned long userspace_addr;
 	int user_alloc;
+	atomic_t refs;
 };
 
 struct kvm_kernel_irq_routing_entry {
