@@ -57,6 +57,10 @@ struct shm_signal_desc {
 #ifdef __KERNEL__
 
 #include <linux/kref.h>
+#include <linux/eventfd.h>
+#include <linux/wait.h>
+#include <linux/poll.h>
+#include <linux/file.h>
 #include <linux/interrupt.h>
 
 struct shm_signal_notifier {
@@ -183,6 +187,17 @@ int shm_signal_disable(struct shm_signal *s, int flags);
  *
  **/
 int shm_signal_inject(struct shm_signal *s, int flags);
+
+/**
+ * shm_signal_eventfd_bind() - Bind an eventfd to a SHM_SIGNAL
+ * @s:        SHM_SIGNAL context
+ *
+ * Binds an eventfd to the shm_signal such that any signal to the eventfd
+ * will trigger a notifier->signal() callback on the shm_signal.
+ *
+ **/
+int shm_signal_eventfd_bindfd(struct shm_signal *signal, int fd);
+int shm_signal_eventfd_bindfile(struct shm_signal *signal, struct file *file);
 
 #endif /* __KERNEL__ */
 

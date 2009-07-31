@@ -202,6 +202,7 @@ config GENERIC_ATOMIC64
 
 config SHM_SIGNAL
 	boolean "SHM Signal - Generic shared-memory signaling mechanism"
+	select EVENTFD
 	default n
 	help
 	 Provides a shared-memory based signaling mechansim to indicate
