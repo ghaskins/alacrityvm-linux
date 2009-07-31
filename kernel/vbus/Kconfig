@@ -29,3 +29,15 @@ config VBUS_DEVICES
 
 source "kernel/vbus/devices/Kconfig"
 
+config VBUS_KVM
+       tristate "Virtual-Bus connector for KVM"
+       depends on VBUS
+       depends on KVM
+       default y
+       help
+         Provides a connector for allowing KVM guests to access
+	 virtual-bus objects.
+
+	 If unsure, say N
+
+

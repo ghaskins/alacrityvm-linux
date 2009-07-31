@@ -358,6 +358,7 @@ unifdef-y += uio.h
 unifdef-y += unistd.h
 unifdef-y += usbdevice_fs.h
 unifdef-y += utsname.h
+unifdef-y += vbus_kvm.h
 unifdef-y += vbus_pci.h
 unifdef-y += venet.h
 unifdef-y += videodev2.h
