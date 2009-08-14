@@ -630,7 +630,7 @@ vbus_pci_open(void)
 {
 	struct vbus_pci_negotiate params = {
 		.magic        = VBUS_PCI_ABI_MAGIC,
-		.version      = VBUS_PCI_ABI_VERSION,
+		.version      = VBUS_PCI_HC_VERSION,
 		.capabilities = 0,
 	};
 
@@ -693,6 +693,13 @@ vbus_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (vbus_pci.enabled)
 		return -EEXIST; /* we only support one bridge per kernel */
 
+	if (pdev->revision != VBUS_PCI_ABI_VERSION) {
+		printk(KERN_DEBUG "VBUS_PCI: expected ABI version %d, got %d\n",
+		       VBUS_PCI_ABI_VERSION,
+		       pdev->revision);
+		return -ENODEV;
+	}
+
 	vbus_pci.dev = pdev;
 
 	ret = pci_enable_device(pdev);
@@ -719,7 +726,7 @@ vbus_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	ret = vbus_pci_open();
 	if (ret < 0) {
-		printk(KERN_ERR "VBUS_PCI: Could not register with host: %d\n",
+		printk(KERN_DEBUG "VBUS_PCI: Could not register with host: %d\n",
 		       ret);
 		goto out_fail;
 	}

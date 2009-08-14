@@ -201,7 +201,7 @@ config GENERIC_ATOMIC64
        bool
 
 config SHM_SIGNAL
-	boolean "SHM Signal - Generic shared-memory signaling mechanism"
+	tristate "SHM Signal - Generic shared-memory signaling mechanism"
 	select EVENTFD
 	default n
 	help
@@ -211,13 +211,13 @@ config SHM_SIGNAL
 	 If unsure, say N
 
 config IOQ
-	boolean "IO-Queue library - Generic shared-memory queue"
+	tristate "IO-Queue library - Generic shared-memory queue"
 	select SHM_SIGNAL
 	default n
 	help
 	 IOQ is a generic shared-memory-queue mechanism that happens to be
 	 friendly to virtualization boundaries. It can be used in a variety
-	 of ways, though its intended purpose is to become the low-level
+	 of ways, though its intended purpose is to become a low-level
 	 communication path for paravirtualized drivers.
 
 	 If unsure, say N

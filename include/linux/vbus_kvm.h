@@ -25,7 +25,6 @@
 
 #include <linux/ioctl.h>
 #include <linux/types.h>
-#include <linux/vbus_client.h>
 #include <linux/vbus_pci.h>
 
 #define VBUS_KVM_ABI_MAGIC 0x34f0ab23

@@ -12,6 +12,7 @@
 
 #include <linux/vbus.h>
 #include <linux/vbus_kvm.h>
+#include <linux/vbus_client.h>
 
 #include "vbus.h"
 

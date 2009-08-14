@@ -28,6 +28,7 @@
 
 #define VBUS_PCI_ABI_MAGIC 0xbf53eef5
 #define VBUS_PCI_ABI_VERSION 1
+#define VBUS_PCI_HC_VERSION 1
 
 enum {
 	VBUS_PCI_HC_NEGOTIATE,

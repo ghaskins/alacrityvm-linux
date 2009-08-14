@@ -282,9 +282,14 @@ struct vbus_memctx_ops {
 	void (*release)(struct vbus_memctx *ctx);
 };
 
+enum vbus_memctx_flag_bits {
+	VBUS_MEMCTX_ATOMIC,
+};
+
 struct vbus_memctx {
 	struct kref kref;
 	struct vbus_memctx_ops *ops;
+	unsigned long flags;
 };
 
 static inline void
@@ -295,9 +300,10 @@ vbus_memctx_init(struct vbus_memctx *ctx, struct vbus_memctx_ops *ops)
 	ctx->ops = ops;
 }
 
-#define VBUS_MEMCTX_INIT(_ops) {                                   \
-        .kref = { .refcount = ATOMIC_INIT(1), },         	   \
-	.ops = _ops,                                               \
+#define VBUS_MEMCTX_INIT(_ops) {			\
+	.kref = { .refcount = ATOMIC_INIT(1), },	\
+	.ops = _ops,					\
+	.flags = 0,					\
 }
 
 static inline void
