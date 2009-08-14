@@ -32,6 +32,8 @@
 #include <linux/kvm_host.h>
 #include <linux/kvm_xinterface.h>
 
+#include "iodev.h"
+
 struct _xinterface {
 	struct kvm            *kvm;
 	struct task_struct    *task;
@@ -43,6 +45,14 @@ struct _xvmap {
 	struct kvm_memory_slot    *memslot;
 	unsigned long              npages;
 	struct kvm_xvmap           vmap;
+};
+
+struct _ioevent {
+	u64                   addr;
+	int                   length;
+	struct kvm_io_bus    *bus;
+	struct kvm_io_device  dev;
+	struct kvm_xioevent   ioevent;
 };
 
 static struct _xinterface *
@@ -289,6 +299,101 @@ fail:
 	return ERR_PTR(ret);
 }
 
+/* MMIO/PIO writes trigger an event if the addr/val match */
+static int
+ioevent_write(struct kvm_io_device *dev, gpa_t addr, int len, const void *val)
+{
+	struct _ioevent *p = container_of(dev, struct _ioevent, dev);
+	struct kvm_xioevent *ioevent = &p->ioevent;
+
+	if (!(addr == p->addr && len == p->length))
+		return -EOPNOTSUPP;
+
+	if (!ioevent->signal)
+		return 0;
+
+	ioevent->signal(ioevent, val);
+	return 0;
+}
+
+static const struct kvm_io_device_ops ioevent_device_ops = {
+	.write = ioevent_write,
+};
+
+static void
+ioevent_deassign(struct kvm_xioevent *ioevent)
+{
+	struct _ioevent    *p = container_of(ioevent, struct _ioevent, ioevent);
+	struct _xinterface *_intf = to_intf(ioevent->intf);
+	struct kvm         *kvm = _intf->kvm;
+
+	kvm_io_bus_unregister_dev(kvm, p->bus, &p->dev);
+	kfree(p);
+}
+
+static const struct kvm_xioevent_ops ioevent_intf_ops = {
+	.deassign = ioevent_deassign,
+};
+
+static struct kvm_xioevent*
+xinterface_ioevent(struct kvm_xinterface *intf,
+		   u64 addr,
+		   unsigned long len,
+		   unsigned long flags)
+{
+	struct _xinterface         *_intf = to_intf(intf);
+	struct kvm                 *kvm = _intf->kvm;
+	int                         pio = flags & KVM_XIOEVENT_FLAG_PIO;
+	struct kvm_io_bus          *bus = pio ? &kvm->pio_bus : &kvm->mmio_bus;
+	struct _ioevent            *p;
+	int                         ret;
+
+	/* must be natural-word sized */
+	switch (len) {
+	case 1:
+	case 2:
+	case 4:
+	case 8:
+		break;
+	default:
+		return ERR_PTR(-EINVAL);
+	}
+
+	/* check for range overflow */
+	if (addr + len < addr)
+		return ERR_PTR(-EINVAL);
+
+	/* check for extra flags that we don't understand */
+	if (flags & ~KVM_XIOEVENT_VALID_FLAG_MASK)
+		return ERR_PTR(-EINVAL);
+
+	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	if (!p) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	p->addr    = addr;
+	p->length  = len;
+	p->bus     = bus;
+
+	kvm_iodevice_init(&p->dev, &ioevent_device_ops);
+
+	ret = kvm_io_bus_register_dev(kvm, bus, &p->dev);
+	if (ret < 0)
+		goto fail;
+
+	kvm_xioevent_init(&p->ioevent, &ioevent_intf_ops, intf);
+
+	return &p->ioevent;
+
+fail:
+	kfree(p);
+
+	return ERR_PTR(ret);
+
+}
+
 static void
 xinterface_release(struct kvm_xinterface *intf)
 {
@@ -304,6 +409,7 @@ struct kvm_xinterface_ops _xinterface_ops = {
 	.copy_to     = xinterface_copy_to,
 	.copy_from   = xinterface_copy_from,
 	.vmap        = xinterface_vmap,
+	.ioevent     = xinterface_ioevent,
 	.release     = xinterface_release,
 };
 
