@@ -39,7 +39,7 @@ struct vbus_pci {
 	struct ioq                eventq;
 	struct vbus_pci_event    *ring;
 	struct vbus_pci_regs     *regs;
-	void                     *piosignal;
+	struct vbus_pci_signals  *signals;
 	int                       irq;
 	int                       enabled:1;
 };
@@ -55,6 +55,9 @@ struct vbus_pci_device {
 	struct work_struct       drop;
 };
 
+DEFINE_PER_CPU(struct vbus_pci_fastcall_desc, vbus_pci_percpu_fastcall)
+____cacheline_aligned;
+
 /*
  * -------------------
  * common routines
@@ -62,9 +65,9 @@ struct vbus_pci_device {
  */
 
 static int
-vbus_pci_hypercall(unsigned long nr, void *data, unsigned long len)
+vbus_pci_bridgecall(unsigned long nr, void *data, unsigned long len)
 {
-	struct vbus_pci_hypercall params = {
+	struct vbus_pci_call_desc params = {
 		.vector = nr,
 		.len    = len,
 		.datap  = __pa(data),
@@ -74,10 +77,33 @@ vbus_pci_hypercall(unsigned long nr, void *data, unsigned long len)
 
 	spin_lock_irqsave(&vbus_pci.lock, flags);
 
-	memcpy_toio(&vbus_pci.regs->hypercall.data, &params, sizeof(params));
-	ret = ioread32(&vbus_pci.regs->hypercall.result);
+	memcpy_toio(&vbus_pci.regs->bridgecall, &params, sizeof(params));
+	ret = ioread32(&vbus_pci.regs->bridgecall);
 
 	spin_unlock_irqrestore(&vbus_pci.lock, flags);
+
+	return ret;
+}
+
+static int
+vbus_pci_buscall(unsigned long nr, void *data, unsigned long len)
+{
+	struct vbus_pci_fastcall_desc *params;
+	int ret;
+
+	preempt_disable();
+
+	params = &get_cpu_var(vbus_pci_percpu_fastcall);
+
+	params->call.vector = nr;
+	params->call.len    = len;
+	params->call.datap  = __pa(data);
+
+	iowrite32(smp_processor_id(), &vbus_pci.signals->fastcall);
+
+	ret = params->result;
+
+	preempt_enable();
 
 	return ret;
 }
@@ -123,7 +149,7 @@ _signal_inject(struct shm_signal *signal)
 {
 	struct _signal *_signal = to_signal(signal);
 
-	iowrite32(_signal->handle, vbus_pci.piosignal);
+	iowrite32(_signal->handle, &vbus_pci.signals->shmsignal);
 
 	return 0;
 }
@@ -160,7 +186,7 @@ vbus_pci_device_open(struct vbus_device_proxy *vdev, int version, int flags)
 	params.devid   = vdev->id;
 	params.version = version;
 
-	ret = vbus_pci_hypercall(VBUS_PCI_HC_DEVOPEN,
+	ret = vbus_pci_buscall(VBUS_PCI_HC_DEVOPEN,
 				 &params, sizeof(params));
 	if (ret < 0)
 		return ret;
@@ -201,7 +227,7 @@ vbus_pci_device_close(struct vbus_device_proxy *vdev, int flags)
 	 * host-side, so there is no need to do an explicit per-shm
 	 * hypercall
 	 */
-	ret = vbus_pci_hypercall(VBUS_PCI_HC_DEVCLOSE,
+	ret = vbus_pci_buscall(VBUS_PCI_HC_DEVCLOSE,
 				 &dev->handle, sizeof(dev->handle));
 
 	if (ret < 0)
@@ -264,7 +290,7 @@ vbus_pci_device_shm(struct vbus_device_proxy *vdev, int id, int prio,
 	} else
 		params.signal.offset = -1; /* yes, this is a u32, but its ok */
 
-	ret = vbus_pci_hypercall(VBUS_PCI_HC_DEVSHM,
+	ret = vbus_pci_buscall(VBUS_PCI_HC_DEVSHM,
 				 &params, sizeof(params));
 	if (ret < 0) {
 		if (_signal) {
@@ -280,6 +306,8 @@ vbus_pci_device_shm(struct vbus_device_proxy *vdev, int id, int prio,
 	}
 
 	if (signal) {
+		BUG_ON(ret < 0);
+
 		_signal->handle = ret;
 
 		spin_lock_irqsave(&vbus_pci.lock, iflags);
@@ -311,7 +339,7 @@ vbus_pci_device_call(struct vbus_device_proxy *vdev, u32 func, void *data,
 	if (!dev->handle)
 		return -EINVAL;
 
-	return vbus_pci_hypercall(VBUS_PCI_HC_DEVCALL, &params, sizeof(params));
+	return vbus_pci_buscall(VBUS_PCI_HC_DEVCALL, &params, sizeof(params));
 }
 
 static void
@@ -570,7 +598,7 @@ static int
 eventq_signal_inject(struct shm_signal *signal)
 {
 	/* The eventq uses the special-case handle=0 */
-	iowrite32(0, vbus_pci.piosignal);
+	iowrite32(0, &vbus_pci.signals->eventq);
 
 	return 0;
 }
@@ -610,8 +638,8 @@ vbus_pci_release(void)
 	if (vbus_pci.irq > 0)
 		free_irq(vbus_pci.irq, NULL);
 
-	if (vbus_pci.piosignal)
-		pci_iounmap(vbus_pci.dev, (void *)vbus_pci.piosignal);
+	if (vbus_pci.signals)
+		pci_iounmap(vbus_pci.dev, (void *)vbus_pci.signals);
 
 	if (vbus_pci.regs)
 		pci_iounmap(vbus_pci.dev, (void *)vbus_pci.regs);
@@ -628,20 +656,20 @@ vbus_pci_release(void)
 static int __init
 vbus_pci_open(void)
 {
-	struct vbus_pci_negotiate params = {
+	struct vbus_pci_bridge_negotiate params = {
 		.magic        = VBUS_PCI_ABI_MAGIC,
 		.version      = VBUS_PCI_HC_VERSION,
 		.capabilities = 0,
 	};
 
-	return vbus_pci_hypercall(VBUS_PCI_HC_NEGOTIATE,
+	return vbus_pci_bridgecall(VBUS_PCI_BRIDGE_NEGOTIATE,
 				  &params, sizeof(params));
 }
 
 #define QLEN 1024
 
 static int __init
-vbus_pci_register(void)
+vbus_pci_eventq_register(void)
 {
 	struct vbus_pci_busreg params = {
 		.count = 1,
@@ -654,7 +682,8 @@ vbus_pci_register(void)
 		},
 	};
 
-	return vbus_pci_hypercall(VBUS_PCI_HC_BUSREG, &params, sizeof(params));
+	return vbus_pci_bridgecall(VBUS_PCI_BRIDGE_QREG,
+				   &params, sizeof(params));
 }
 
 static int __init
@@ -689,6 +718,7 @@ static int __devinit
 vbus_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	int ret;
+	int cpu;
 
 	if (vbus_pci.enabled)
 		return -EEXIST; /* we only support one bridge per kernel */
@@ -718,8 +748,8 @@ vbus_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto out_fail;
 	}
 
-	vbus_pci.piosignal = pci_iomap(pdev, 1, sizeof(u32));
-	if (!vbus_pci.piosignal) {
+	vbus_pci.signals = pci_iomap(pdev, 1, sizeof(struct vbus_pci_signals));
+	if (!vbus_pci.signals) {
 		printk(KERN_ERR "VBUS_PCI: Could not map BARs\n");
 		goto out_fail;
 	}
@@ -762,9 +792,32 @@ vbus_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	/*
+	 * Add one fastcall vector per cpu so that we can do lockless
+	 * hypercalls
+	 */
+	for_each_possible_cpu(cpu) {
+		struct vbus_pci_fastcall_desc *desc =
+			&per_cpu(vbus_pci_percpu_fastcall, cpu);
+		struct vbus_pci_call_desc params = {
+			.vector = cpu,
+			.len    = sizeof(*desc),
+			.datap  = __pa(desc),
+		};
+
+		ret = vbus_pci_bridgecall(VBUS_PCI_BRIDGE_FASTCALL_ADD,
+					  &params, sizeof(params));
+		if (ret < 0) {
+			printk(KERN_ERR \
+			       "VBUS_PCI: Failed to register cpu:%d\n: %d",
+			       cpu, ret);
+			goto out_fail;
+		}
+	}
+
+	/*
 	 * Finally register our queue on the host to start receiving events
 	 */
-	ret = vbus_pci_register();
+	ret = vbus_pci_eventq_register();
 	if (ret < 0) {
 		printk(KERN_ERR "VBUS_PCI: Could not register with host: %d\n",
 		       ret);

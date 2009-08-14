@@ -27,12 +27,20 @@
 #include <linux/types.h>
 
 #define VBUS_PCI_ABI_MAGIC 0xbf53eef5
-#define VBUS_PCI_ABI_VERSION 1
+#define VBUS_PCI_ABI_VERSION 2
 #define VBUS_PCI_HC_VERSION 1
 
 enum {
-	VBUS_PCI_HC_NEGOTIATE,
-	VBUS_PCI_HC_BUSREG,
+	VBUS_PCI_BRIDGE_NEGOTIATE,
+	VBUS_PCI_BRIDGE_QREG,
+	VBUS_PCI_BRIDGE_SLOWCALL,
+	VBUS_PCI_BRIDGE_FASTCALL_ADD,
+	VBUS_PCI_BRIDGE_FASTCALL_DROP,
+
+	VBUS_PCI_BRIDGE_MAX, /* must be last */
+};
+
+enum {
 	VBUS_PCI_HC_DEVOPEN,
 	VBUS_PCI_HC_DEVCLOSE,
 	VBUS_PCI_HC_DEVCALL,
@@ -41,7 +49,7 @@ enum {
 	VBUS_PCI_HC_MAX,      /* must be last */
 };
 
-struct vbus_pci_negotiate {
+struct vbus_pci_bridge_negotiate {
 	__u32 magic;
 	__u32 version;
 	__u64 capabilities;
@@ -72,20 +80,29 @@ struct vbus_pci_deviceshm {
 		__u64 cookie; /* token to pass back when signaling client */
 	} signal;
 	__u64 datap;
-	__u64 handle; /* return value for signaling from client to kernel */
 };
 
-struct vbus_pci_hypercall {
+struct vbus_pci_call_desc {
 	__u32 vector;
 	__u32 len;
 	__u64 datap;
 };
 
+struct vbus_pci_fastcall_desc {
+	struct vbus_pci_call_desc call;
+	__u32                     result;
+};
+
 struct vbus_pci_regs {
-	struct {
-		struct vbus_pci_hypercall data;
-		__u32                     result;
-	} hypercall;
+	struct vbus_pci_call_desc bridgecall;
+	__u8                      pad[48];
+};
+
+struct vbus_pci_signals {
+	__u32 eventq;
+	__u32 fastcall;
+	__u32 shmsignal;
+	__u8  pad[20];
 };
 
 struct vbus_pci_eventqreg {
