@@ -32,7 +32,7 @@ static struct map_ops nodeptr_map_ops = {
 
 struct _signal {
 	struct kref kref;
-	struct rb_node node;
+	unsigned int id;
 	struct list_head list;
 	struct shm_signal *signal;
 };
@@ -106,19 +106,16 @@ static inline void conn_put(struct _connection *_conn)
 struct _client {
 	struct mutex lock;
 	struct map conn_map;
-	struct map signal_map;
+	struct radix_tree_root signal_map;
+	unsigned int nextid;
 	struct vbus *vbus;
 	struct vbus_client client;
+	struct srcu_struct srcu;
 };
 
 struct _connection *to_conn(struct rb_node *node)
 {
 	return node ? container_of(node, struct _connection, node) : NULL;
-}
-
-static struct _signal *to_signal(struct rb_node *node)
-{
-	return node ? container_of(node, struct _signal, node) : NULL;
 }
 
 static struct _client *to_client(struct vbus_client *client)
@@ -208,7 +205,8 @@ conn_del(struct _client *c, struct _connection *_conn)
 
 	/* Delete and release each opened queue */
 	list_for_each_entry_safe(_signal, tmp, &_conn->signals, list) {
-		map_del(&c->signal_map, &_signal->node);
+		radix_tree_delete(&c->signal_map, _signal->id);
+		synchronize_srcu(&c->srcu);
 		_signal_put(_signal);
 	}
 
@@ -269,7 +267,7 @@ _deviceshm(struct vbus_client *client,
 	   struct vbus_shm *shm,
 	   struct shm_signal *signal,
 	   __u32 flags,
-	   __u64 *handle)
+	   unsigned int *handle)
 {
 	struct _client *c = to_client(client);
 	struct _signal *_signal = NULL;
@@ -305,12 +303,24 @@ _deviceshm(struct vbus_client *client,
 		shm_signal_get(signal);
 
 		mutex_lock(&c->lock);
-		ret = map_add(&c->signal_map, &_signal->node);
+
+		if (c->nextid == -1) {
+			kfree(_signal);
+			mutex_unlock(&c->lock);
+			return -ENOSPC;
+		}
+
+		_signal->id = c->nextid++;
+
+		ret = radix_tree_insert(&c->signal_map, _signal->id, signal);
+		BUG_ON(ret < 0);
+
 		list_add_tail(&_signal->list, &_conn->signals);
+
 		mutex_unlock(&c->lock);
 
 		if (!ret)
-			*handle = (__u64)&_signal->node;
+			*handle = _signal->id;
 	}
 
 	conn_put(_conn);
@@ -319,27 +329,24 @@ _deviceshm(struct vbus_client *client,
 }
 
 static int
-_shmsignal(struct vbus_client *client, __u64 handle)
+_shmsignal(struct vbus_client *client, unsigned int handle)
 {
 	struct _client *c = to_client(client);
-	struct _signal *_signal;
+	struct shm_signal *signal;
+	int ret = 0;
+	int idx;
 
-	mutex_lock(&c->lock);
+	idx = srcu_read_lock(&c->srcu);
 
-	_signal = to_signal(map_find(&c->signal_map, &handle));
-	if (likely(_signal))
-		_signal_get(_signal);
+	signal = radix_tree_lookup(&c->signal_map, handle);
+	if (likely(signal))
+		_shm_signal_wakeup(signal);
+	else
+		ret = -ENOENT;
 
-	mutex_unlock(&c->lock);
+	srcu_read_unlock(&c->srcu, idx);
 
-	if (!_signal)
-		return -ENOENT;
-
-	_shm_signal_wakeup(_signal->signal);
-
-	_signal_put(_signal);
-
-	return 0;
+	return ret;
 }
 
 static void
@@ -355,6 +362,9 @@ _release(struct vbus_client *client)
 		conn_del(c, _conn);
 		conn_put(_conn);
 	}
+
+	synchronize_srcu(&c->srcu);
+	cleanup_srcu_struct(&c->srcu);
 
 	vbus_put(c->vbus);
 	kfree(c);
@@ -384,8 +394,11 @@ struct vbus_client *vbus_client_attach(struct vbus *vbus)
 
 	mutex_init(&c->lock);
 	map_init(&c->conn_map, &nodeptr_map_ops);
-	map_init(&c->signal_map, &nodeptr_map_ops);
+	INIT_RADIX_TREE(&c->signal_map, GFP_KERNEL);
+	c->nextid = 0;
 	c->vbus = vbus_get(vbus);
+
+	init_srcu_struct(&c->srcu);
 
 	return &c->client;
 }
