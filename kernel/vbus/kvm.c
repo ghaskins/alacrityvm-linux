@@ -947,7 +947,7 @@ hc_deviceshm(struct vbus_kvm *vkvm, void *vargs)
 	}
 
 	ret = c->ops->deviceshm(c, args->devh, args->id,
-				&_shm->shm, signal, args->flags);
+				&_shm->shm, signal, args->flags, NULL);
 	if (ret < 0)
 		goto out;
 

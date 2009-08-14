@@ -53,7 +53,8 @@ struct vbus_client_ops {
 	int (*deviceshm)(struct vbus_client *client,
 			 __u64 devh, __u32 id,
 			 struct vbus_shm *shm, struct shm_signal *signal,
-			 __u32 flags);
+			 __u32 flags, __u64 *handle);
+	int (*shmsignal)(struct vbus_client *client, __u64 handle);
 	void (*release)(struct vbus_client *client);
 };
 

@@ -72,6 +72,7 @@ struct vbus_pci_deviceshm {
 		__u64 cookie; /* token to pass back when signaling client */
 	} signal;
 	__u64 datap;
+	__u64 handle; /* return value for signaling from client to kernel */
 };
 
 struct vbus_pci_hypercall {

@@ -30,12 +30,38 @@ static struct map_ops nodeptr_map_ops = {
 	.item_compare = &nodeptr_item_compare,
 };
 
+struct _signal {
+	struct kref kref;
+	struct rb_node node;
+	struct list_head list;
+	struct shm_signal *signal;
+};
+
 struct _connection {
 	struct kref kref;
 	struct rb_node node;
+	struct list_head signals;
 	struct vbus_connection *conn;
 	int closed:1;
 };
+
+static inline void _signal_get(struct _signal *_signal)
+{
+	kref_get(&_signal->kref);
+}
+
+static inline void _signal_release(struct kref *kref)
+{
+	struct _signal *_signal = container_of(kref, struct _signal, kref);
+
+	shm_signal_put(_signal->signal);
+	kfree(_signal);
+}
+
+static inline void _signal_put(struct _signal *_signal)
+{
+	kref_put(&_signal->kref, _signal_release);
+}
 
 static inline void conn_get(struct _connection *_conn)
 {
@@ -55,11 +81,17 @@ static inline void conn_close(struct _connection *_conn)
 static inline void _conn_release(struct kref *kref)
 {
 	struct _connection *_conn;
+	struct _signal *_signal, *tmp;
 
 	_conn = container_of(kref, struct _connection, kref);
 
 	if (!_conn->closed)
 		conn_close(_conn);
+
+	list_for_each_entry_safe(_signal, tmp, &_conn->signals, list) {
+		list_del(&_signal->list);
+		_signal_put(_signal);
+	}
 
 	vbus_connection_put(_conn->conn);
 	kfree(_conn);
@@ -74,6 +106,7 @@ static inline void conn_put(struct _connection *_conn)
 struct _client {
 	struct mutex lock;
 	struct map conn_map;
+	struct map signal_map;
 	struct vbus *vbus;
 	struct vbus_client client;
 };
@@ -81,6 +114,11 @@ struct _client {
 struct _connection *to_conn(struct rb_node *node)
 {
 	return node ? container_of(node, struct _connection, node) : NULL;
+}
+
+static struct _signal *to_signal(struct rb_node *node)
+{
+	return node ? container_of(node, struct _signal, node) : NULL;
 }
 
 static struct _client *to_client(struct vbus_client *client)
@@ -142,6 +180,8 @@ _deviceopen(struct vbus_client *client, struct vbus_memctx *ctx,
 	kref_init(&_conn->kref);
 	_conn->conn = conn;
 
+	INIT_LIST_HEAD(&_conn->signals);
+
 	mutex_lock(&c->lock);
 	ret = map_add(&c->conn_map, &_conn->node);
 	mutex_unlock(&c->lock);
@@ -164,6 +204,14 @@ _deviceopen(struct vbus_client *client, struct vbus_memctx *ctx,
 static void
 conn_del(struct _client *c, struct _connection *_conn)
 {
+	struct _signal *_signal, *tmp;
+
+	/* Delete and release each opened queue */
+	list_for_each_entry_safe(_signal, tmp, &_conn->signals, list) {
+		map_del(&c->signal_map, &_signal->node);
+		_signal_put(_signal);
+	}
+
 	map_del(&c->conn_map, &_conn->node);
 }
 
@@ -220,12 +268,17 @@ _deviceshm(struct vbus_client *client,
 	   __u32 id,
 	   struct vbus_shm *shm,
 	   struct shm_signal *signal,
-	   __u32 flags)
+	   __u32 flags,
+	   __u64 *handle)
 {
 	struct _client *c = to_client(client);
+	struct _signal *_signal = NULL;
 	struct _connection *_conn;
 	struct vbus_connection *conn;
 	int ret;
+
+	if (handle)
+		*handle = 0;
 
 	_conn = connection_find(c, devh);
 	if (!_conn)
@@ -234,10 +287,59 @@ _deviceshm(struct vbus_client *client,
 	conn = _conn->conn;
 
 	ret = conn->ops->shm(conn, id, shm, signal, flags);
+	if (ret < 0) {
+		conn_put(_conn);
+		return ret;
+	}
+
+	if (handle && signal) {
+		_signal = kzalloc(sizeof(*_signal), GFP_KERNEL);
+		if (!_signal) {
+			conn_put(_conn);
+			return -ENOMEM;
+		}
+
+		 /* one for map-ref, one for list-ref */
+		kref_set(&_signal->kref, 2);
+		_signal->signal = signal;
+		shm_signal_get(signal);
+
+		mutex_lock(&c->lock);
+		ret = map_add(&c->signal_map, &_signal->node);
+		list_add_tail(&_signal->list, &_conn->signals);
+		mutex_unlock(&c->lock);
+
+		if (!ret)
+			*handle = (__u64)&_signal->node;
+	}
 
 	conn_put(_conn);
 
-	return ret;
+	return 0;
+}
+
+static int
+_shmsignal(struct vbus_client *client, __u64 handle)
+{
+	struct _client *c = to_client(client);
+	struct _signal *_signal;
+
+	mutex_lock(&c->lock);
+
+	_signal = to_signal(map_find(&c->signal_map, &handle));
+	if (likely(_signal))
+		_signal_get(_signal);
+
+	mutex_unlock(&c->lock);
+
+	if (!_signal)
+		return -ENOENT;
+
+	_shm_signal_wakeup(_signal->signal);
+
+	_signal_put(_signal);
+
+	return 0;
 }
 
 static void
@@ -263,6 +365,7 @@ struct vbus_client_ops _client_ops = {
 	.deviceclose = _deviceclose,
 	.devicecall  = _devicecall,
 	.deviceshm   = _deviceshm,
+	.shmsignal   = _shmsignal,
 	.release     = _release,
 };
 
@@ -281,6 +384,7 @@ struct vbus_client *vbus_client_attach(struct vbus *vbus)
 
 	mutex_init(&c->lock);
 	map_init(&c->conn_map, &nodeptr_map_ops);
+	map_init(&c->signal_map, &nodeptr_map_ops);
 	c->vbus = vbus_get(vbus);
 
 	return &c->client;
