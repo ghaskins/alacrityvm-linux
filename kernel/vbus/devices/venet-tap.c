@@ -913,12 +913,17 @@ venettap_rx_isr(struct ioq_notifier *notifier)
 	if (priv->vbus.link && priv->netif.link
 	    && !ioq_empty(priv->vbus.rxq.queue, ioq_idxtype_inuse)
 	    && !test_and_set_bit(RX_SCHED, &priv->flags)) {
-		s64 delta;
+		s64 delta = 0;
 
 		ioq_notify_disable(priv->vbus.rxq.queue, 0);
 		barrier();
 
-		delta = ktime_us_delta(now, priv->burst.expires);
+		if (priv->burst.thresh) {
+			delta = ktime_us_delta(now, priv->burst.expires);
+			priv->burst.expires = ktime_add_us(now,
+							   priv->burst.thresh);
+		}
+
 		if (delta <= 0)
 			/*
 			 * Back to back calls (within our burst threshold)
@@ -935,7 +940,6 @@ venettap_rx_isr(struct ioq_notifier *notifier)
 			direct = 1;
 	}
 
-	priv->burst.expires = ktime_add_us(now, priv->burst.thresh);
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 
@@ -1561,7 +1565,7 @@ burstthresh_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	if (count > 0)
 		sscanf(buf, "%d", &val);
 
-	if (val > 0)
+	if (val >= 0)
 		priv->burst.thresh = val;
 
 	return count;
