@@ -1560,7 +1560,6 @@ burstthresh_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 {
 	struct venettap *priv = vdev_to_priv(dev);
 	int val = -1;
-	int ret = 0;
 
 	if (count > 0)
 		sscanf(buf, "%d", &val);
