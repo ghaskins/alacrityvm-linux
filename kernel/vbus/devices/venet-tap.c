@@ -1646,7 +1646,7 @@ venettap_device_create(struct vbus_devclass *dc,
 
 	priv->vbus.rx_ops      = &venettap_flat_rx_ops;
 	init_waitqueue_head(&priv->vbus.rx_empty);
-	priv->burst.thresh     = 20; /* microseconds */
+	priv->burst.thresh     = 0; /* microseconds, 0 = disabled */
 
 	/*
 	 * netif init
