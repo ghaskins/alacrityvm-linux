@@ -29,6 +29,7 @@
 #include <linux/vmalloc.h>
 #include <linux/highmem.h>
 #include <linux/module.h>
+#include <linux/mmu_context.h>
 #include <linux/kvm_host.h>
 #include <linux/kvm_xinterface.h>
 
@@ -144,20 +145,18 @@ const static struct kvm_xvmap_ops _xvmap_ops = {
 
 /*------------------------------------------------------------------------*/
 
+/*
+ * This function is invoked in the cases where a process context other
+ * than _intf->mm tries to copy data.  Otherwise, we use copy_to_user()
+ */
 static unsigned long
-xinterface_copy_to(struct kvm_xinterface *intf, unsigned long gpa,
-		   const void *src, unsigned long n)
+_slow_copy_to_user(struct _xinterface *_intf, unsigned long dst,
+		    const void *src, unsigned long n)
 {
-	struct _xinterface *_intf = to_intf(intf);
 	struct task_struct *p = _intf->task;
 	struct mm_struct *mm = _intf->mm;
-	unsigned long dst;
 
-	down_read(&_intf->kvm->slots_lock);
-
-	dst = gpa_to_hva(_intf, gpa);
-
-	while (dst && n) {
+	while (n) {
 		unsigned long offset = offset_in_page(dst);
 		unsigned long len = PAGE_SIZE - offset;
 		int ret;
@@ -187,25 +186,52 @@ xinterface_copy_to(struct kvm_xinterface *intf, unsigned long gpa,
 		n -= len;
 	}
 
+	return n;
+}
+
+static unsigned long
+xinterface_copy_to(struct kvm_xinterface *intf, unsigned long gpa,
+		   const void *src, unsigned long n)
+{
+	struct _xinterface *_intf = to_intf(intf);
+	unsigned long dst;
+	bool kthread = !current->mm;
+
+	down_read(&_intf->kvm->slots_lock);
+
+	dst = gpa_to_hva(_intf, gpa);
+	if (!dst)
+		goto out;
+
+	if (kthread)
+		use_mm(_intf->mm);
+
+	if (kthread || _intf->task == current)
+		n = copy_to_user((void *)dst, src, n);
+	else
+		n = _slow_copy_to_user(_intf, dst, src, n);
+
+	if (kthread)
+		unuse_mm(_intf->mm);
+
+out:
 	up_read(&_intf->kvm->slots_lock);
 
 	return n;
 }
 
+/*
+ * This function is invoked in the cases where a process context other
+ * than _intf->mm tries to copy data.  Otherwise, we use copy_from_user()
+ */
 static unsigned long
-xinterface_copy_from(struct kvm_xinterface *intf, void *dst,
-		     unsigned long gpa, unsigned long n)
+_slow_copy_from_user(struct _xinterface *_intf, void *dst,
+		     unsigned long src, unsigned long n)
 {
-	struct _xinterface *_intf = to_intf(intf);
 	struct task_struct *p = _intf->task;
 	struct mm_struct *mm = _intf->mm;
-	unsigned long src;
 
-	down_read(&_intf->kvm->slots_lock);
-
-	src = gpa_to_hva(_intf, gpa);
-
-	while (src && n) {
+	while (n) {
 		unsigned long offset = offset_in_page(src);
 		unsigned long len = PAGE_SIZE - offset;
 		int ret;
@@ -234,6 +260,35 @@ xinterface_copy_from(struct kvm_xinterface *intf, void *dst,
 		n -= len;
 	}
 
+	return n;
+}
+
+static unsigned long
+xinterface_copy_from(struct kvm_xinterface *intf, void *dst,
+		     unsigned long gpa, unsigned long n)
+{
+	struct _xinterface *_intf = to_intf(intf);
+	unsigned long src;
+	bool kthread = !current->mm;
+
+	down_read(&_intf->kvm->slots_lock);
+
+	src = gpa_to_hva(_intf, gpa);
+	if (!src)
+		goto out;
+
+	if (kthread)
+		use_mm(_intf->mm);
+
+	if (kthread || _intf->task == current)
+		n = copy_from_user(dst, (void *)src, n);
+	else
+		n = _slow_copy_from_user(_intf, dst, src, n);
+
+	if (kthread)
+		unuse_mm(_intf->mm);
+
+out:
 	up_read(&_intf->kvm->slots_lock);
 
 	return n;
