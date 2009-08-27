@@ -84,9 +84,6 @@ enum {
 	TX_IOQ_CONGESTED,
 };
 
-#define VSG_DESC_SIZE(count) (sizeof(struct venet_sg) + \
-			      sizeof(struct venet_iov) * ((count) - 1))
-
 #define MAX_VSG_DESC_SIZE VSG_DESC_SIZE(MAX_SKB_FRAGS)
 
 struct venettap;
