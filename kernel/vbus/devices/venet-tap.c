@@ -543,7 +543,7 @@ venettap_rx(struct venettap *priv)
 	 */
 	while (iter.desc->sown) {
 		struct sk_buff *skb = NULL;
-		size_t len;
+		int len;
 
 		len = rx_ops->decode(priv,
 				     (void *)iter.desc->ptr,
