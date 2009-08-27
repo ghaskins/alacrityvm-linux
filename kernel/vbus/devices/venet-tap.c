@@ -555,7 +555,7 @@ venettap_rx(struct venettap *priv)
 			goto next;
 		}
 
-		skb = dev_alloc_skb(len+2);
+		skb = dev_alloc_skb(len + NET_IP_ALIGN);
 		if (unlikely(!skb)) {
 			printk(KERN_INFO "VENETTAP: skb alloc failed:"	\
 			       " memory squeeze.\n");
@@ -565,7 +565,7 @@ venettap_rx(struct venettap *priv)
 		}
 
 		/* align IP on 16B boundary */
-		skb_reserve(skb, 2);
+		skb_reserve(skb, NET_IP_ALIGN);
 
 		ret = rx_ops->import(priv, skb, (void *)iter.desc->ptr, len);
 		if (unlikely(ret < 0)) {
