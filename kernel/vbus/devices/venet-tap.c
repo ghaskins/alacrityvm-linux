@@ -343,13 +343,18 @@ venettap_sg_decode(struct venettap *priv, void *ptr, int len)
 	ret = ctx->ops->copy_from(ctx, vsg, ptr, len);
 	BUG_ON(ret);
 
-	/*
-	 * Non GSO type packets should be constrained by the MTU setting
-	 * on the host
-	 */
-	if (!(vsg->flags & VENET_SG_FLAG_GSO)
-	    && (vsg->len > (priv->netif.dev->mtu + ETH_HLEN)))
-		return -1;
+	if (vsg->flags & VENET_SG_FLAG_GSO) {
+		/* GSO packets shall not exceed 64k frames */
+		if (vsg->len > 65536)
+			return -1;
+
+	} else
+		/*
+		 * Non GSO type packets should be constrained by the MTU setting
+		 * on the host
+		 */
+		if (vsg->len > (priv->netif.dev->mtu + ETH_HLEN))
+			return -1;
 
 	return vsg->len;
 }
