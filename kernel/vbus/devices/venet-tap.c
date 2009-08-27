@@ -341,7 +341,8 @@ venettap_sg_decode(struct venettap *priv, void *ptr, int len)
 	ctx = priv->vbus.ctx;
 
 	ret = ctx->ops->copy_from(ctx, vsg, ptr, len);
-	BUG_ON(ret);
+	if (ret)
+		return -1;
 
 	if (vsg->flags & VENET_SG_FLAG_GSO) {
 		/* GSO packets shall not exceed 64k frames */
@@ -703,6 +704,7 @@ venettap_tx(struct venettap *priv)
 	BUG_ON(ret < 0);
 
 	while (priv->vbus.link && iter.desc->sown && priv->netif.txq.len) {
+		bool sent = false;
 
 		skb = __skb_dequeue(&priv->netif.txq.list);
 		if (!skb)
@@ -715,22 +717,22 @@ venettap_tx(struct venettap *priv)
 		if (skb->len <= iter.desc->len) {
 			ret = ctx->ops->copy_to(ctx, (void *)iter.desc->ptr,
 					       skb->data, skb->len);
-			BUG_ON(ret);
+			if (!ret) {
+				iter.desc->len = skb->len;
 
-			iter.desc->len = skb->len;
+				npackets++;
+				priv->netif.stats.tx_packets++;
+				priv->netif.stats.tx_bytes += skb->len;
 
-			npackets++;
-			priv->netif.stats.tx_packets++;
-			priv->netif.stats.tx_bytes += skb->len;
+				ret = ioq_iter_push(&iter, 0);
+				BUG_ON(ret < 0);
 
-			ret = ioq_iter_push(&iter, 0);
-			BUG_ON(ret < 0);
-		} else {
-			printk(KERN_WARNING				\
-			       "VENETTAP: discarding packet: buf too small " \
-			       "(%d > %lld)\n", skb->len, iter.desc->len);
-			priv->netif.stats.tx_errors++;
+				sent = true;
+			}
 		}
+
+		if (!sent)
+			priv->netif.stats.tx_errors++;
 
 		dev_kfree_skb(skb);
 		priv->netif.dev->trans_start = jiffies; /* save the timestamp */
