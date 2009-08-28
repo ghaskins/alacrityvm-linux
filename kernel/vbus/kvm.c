@@ -72,6 +72,7 @@ struct vbus_kvm {
 	struct vbus            *vbus;
 	struct vbus_client     *client;
 	struct vbus_memctx     *ctx;
+	struct mm_struct       *mm;
 	struct {
 		int             count;
 		struct _eventq  queues[EVENTQ_COUNT];
@@ -193,6 +194,17 @@ _memctx_copy_from(struct vbus_memctx *ctx, void *dst, const void *src,
 	return kvm->ops->copy_from(kvm, dst, (unsigned long)src, n);
 }
 
+static struct mm_struct *
+_memctx_mm_get(struct vbus_memctx *ctx)
+{
+	struct _memctx *_memctx = to_memctx(ctx);
+	struct mm_struct *mm = _memctx->vkvm->mm;
+
+	atomic_inc(&mm->mm_users);
+
+	return mm;
+}
+
 static void
 _memctx_release(struct vbus_memctx *ctx)
 {
@@ -205,6 +217,7 @@ _memctx_release(struct vbus_memctx *ctx)
 static struct vbus_memctx_ops _memctx_ops = {
 	.copy_to   = &_memctx_copy_to,
 	.copy_from = &_memctx_copy_from,
+	.mm_get    = &_memctx_mm_get,
 	.release   = &_memctx_release,
 };
 
@@ -1121,6 +1134,7 @@ _open_ioctl(struct vbus_kvm *vkvm, struct vbus_kvm_open *args)
 
 	vkvm->kvm = kvm;
 	vkvm->state = _state_connect;
+	vkvm->mm = get_task_mm(current);
 
 	return VBUS_PCI_HC_VERSION;
 }
@@ -1368,6 +1382,7 @@ vbus_kvm_chardev_release(struct inode *inode, struct file *filp)
 		_eventq_detach(&vkvm->eventq.queues[i]);
 
 	_fastcall_channels_release(vkvm);
+	mmput(vkvm->mm);
 	vbus_memctx_put(vkvm->ctx);
 	vbus_client_put(vkvm->client);
 	vbus_notifier_unregister(vkvm->vbus, &vkvm->vbusnotify);

@@ -279,6 +279,7 @@ struct vbus_memctx_ops {
 				   void *dst,
 				   const void *src,
 				   unsigned long len);
+	struct mm_struct *(*mm_get)(struct vbus_memctx *ctx);
 	void (*release)(struct vbus_memctx *ctx);
 };
 
