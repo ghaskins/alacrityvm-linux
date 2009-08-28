@@ -43,6 +43,7 @@
 #include <linux/vbus.h>
 #include <linux/freezer.h>
 #include <linux/kthread.h>
+#include <linux/mmu_context.h>
 #include <linux/ktime.h>
 
 #include <linux/venet.h>
@@ -676,6 +677,15 @@ next:
 static int venettap_rx_thread(void *__priv)
 {
 	struct venettap *priv = __priv;
+	struct vbus_memctx *ctx = priv->vbus.ctx;
+	struct mm_struct *mm = NULL;
+
+	if (ctx->ops->mm_get) {
+		mm = ctx->ops->mm_get(ctx);
+		BUG_ON(!mm);
+
+		use_mm(mm);
+	}
 
 	for (;;) {
 		set_current_state(TASK_INTERRUPTIBLE);
@@ -691,6 +701,11 @@ static int venettap_rx_thread(void *__priv)
 			break;
 
 		venettap_rx(priv);
+	}
+
+	if (mm) {
+		unuse_mm(mm);
+		mmput(mm);
 	}
 
 	return 0;
@@ -816,6 +831,15 @@ venettap_tx(struct venettap *priv)
 static int venettap_tx_thread(void *__priv)
 {
 	struct venettap *priv = __priv;
+	struct vbus_memctx *ctx = priv->vbus.ctx;
+	struct mm_struct *mm = NULL;
+
+	if (ctx->ops->mm_get) {
+		mm = ctx->ops->mm_get(ctx);
+		BUG_ON(!mm);
+
+		use_mm(mm);
+	}
 
 	for (;;) {
 		set_current_state(TASK_INTERRUPTIBLE);
@@ -838,6 +862,11 @@ static int venettap_tx_thread(void *__priv)
 			break;
 
 		venettap_tx(priv);
+	}
+
+	if (mm) {
+		unuse_mm(mm);
+		mmput(mm);
 	}
 
 	return 0;
