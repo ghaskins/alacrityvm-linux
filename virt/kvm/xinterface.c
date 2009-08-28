@@ -206,7 +206,7 @@ xinterface_copy_to(struct kvm_xinterface *intf, unsigned long gpa,
 	if (kthread)
 		use_mm(_intf->mm);
 
-	if (kthread || _intf->task == current)
+	if (kthread || _intf->mm == current->mm)
 		n = copy_to_user((void *)dst, src, n);
 	else
 		n = _slow_copy_to_user(_intf, dst, src, n);
@@ -280,7 +280,7 @@ xinterface_copy_from(struct kvm_xinterface *intf, void *dst,
 	if (kthread)
 		use_mm(_intf->mm);
 
-	if (kthread || _intf->task == current)
+	if (kthread || _intf->mm == current->mm)
 		n = copy_from_user(dst, (void *)src, n);
 	else
 		n = _slow_copy_from_user(_intf, dst, src, n);
