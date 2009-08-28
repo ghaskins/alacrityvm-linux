@@ -141,6 +141,7 @@ struct venettap {
 		int                          thresh;
 		ktime_t                      expires;
 	} burst;
+	int                                  txmitigation;
 
 };
 
@@ -648,7 +649,7 @@ next:
 		BUG_ON(ret < 0);
 
 		/* send up to N packets before sending tx-complete */
-		if (!(npackets % 10)) {
+		if (!priv->txmitigation || !(npackets % priv->txmitigation)) {
 			ioq_signal(ioq, 0);
 			dirty = 0;
 		}
@@ -1670,6 +1671,34 @@ static struct vbus_device_attribute attr_burstthresh =
 	__ATTR(burstthresh, S_IRUGO | S_IWUSR, burstthresh_show, burstthresh_store);
 
 static ssize_t
+txmitigation_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
+	      char *buf)
+{
+	struct venettap *priv = vdev_to_priv(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", priv->txmitigation);
+}
+
+static ssize_t
+txmitigation_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
+	       const char *buf, size_t count)
+{
+	struct venettap *priv = vdev_to_priv(dev);
+	int val = -1;
+
+	if (count > 0)
+		sscanf(buf, "%d", &val);
+
+	if (val >= 0)
+		priv->txmitigation = val;
+
+	return count;
+}
+
+static struct vbus_device_attribute attr_txmitigation =
+	__ATTR(txmitigation, S_IRUGO | S_IWUSR, txmitigation_show, txmitigation_store);
+
+static ssize_t
 ifname_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	   char *buf)
 {
@@ -1689,6 +1718,7 @@ static struct attribute *attrs[] = {
 	&attr_cmac.attr,
 	&attr_enabled.attr,
 	&attr_burstthresh.attr,
+	&attr_txmitigation.attr,
 	&attr_ifname.attr,
 	NULL,
 };
@@ -1742,6 +1772,7 @@ venettap_device_create(struct vbus_devclass *dc,
 	priv->vbus.rx_ops      = &venettap_flat_rx_ops;
 	init_waitqueue_head(&priv->vbus.rx_empty);
 	priv->burst.thresh     = 0; /* microseconds, 0 = disabled */
+	priv->txmitigation     = 10; /* nr-packets, 0 = disabled */
 
 	/*
 	 * netif init
