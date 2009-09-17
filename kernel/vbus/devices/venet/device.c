@@ -1193,6 +1193,7 @@ void venetdev_init(struct venetdev *device, struct net_device *dev)
 	device->vbus.rx_ops      = &venetdev_flat_rx_ops;
 	init_waitqueue_head(&device->vbus.rx_empty);
 	device->burst.thresh     = 0; /* microseconds, 0 = disabled */
+	device->txmitigation     = 10; /* nr-packets, 0 = disabled */
 
 	/*
 	 * netif init
