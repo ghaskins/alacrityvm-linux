@@ -2,9 +2,14 @@
 # Virtual-Bus (VBus) configuration
 #
 
+config VBUS_VENETDEV
+       bool
+       default n
+
 config VBUS_VENETTAP
        tristate "Virtual-Bus Ethernet Tap Device"
        depends on VBUS_DEVICES
+       select VBUS_VENETDEV
        default n
        help
         Provides a virtual ethernet adapter to a vbus, which in turn
