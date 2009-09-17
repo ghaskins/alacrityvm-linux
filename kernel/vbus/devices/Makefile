@@ -1,1 +1,2 @@
-obj-$(CONFIG_VBUS_VENETTAP) += venet-tap.o
+obj-$(CONFIG_VBUS_VENETDEV) += venet/
+
