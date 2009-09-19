@@ -3,7 +3,7 @@
 #
 
 config VBUS_VENETDEV
-       bool
+       tristate
        default n
 
 config VBUS_VENETTAP
