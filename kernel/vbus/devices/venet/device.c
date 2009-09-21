@@ -1351,7 +1351,6 @@ host_mac_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 struct vbus_device_attribute attr_hmac =
 	__ATTR_RO(host_mac);
 
-
 static ssize_t
 cmac_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	      const char *buf, size_t count)
