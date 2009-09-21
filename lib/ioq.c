@@ -265,7 +265,9 @@ static void ioq_shm_signal(struct shm_signal_notifier *notifier)
 {
 	struct ioq *ioq = container_of(notifier, struct ioq, shm_notifier);
 
-	wake_up(&ioq->wq);
+	if (waitqueue_active(&ioq->wq))
+		wake_up(&ioq->wq);
+
 	if (ioq->notifier)
 		ioq->notifier->signal(ioq->notifier);
 }
