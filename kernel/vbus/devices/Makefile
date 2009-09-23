@@ -1,2 +1,3 @@
-obj-$(CONFIG_VBUS_VENETDEV) += venet/
-
+ifdef CONFIG_VBUS_VENETDEV
+obj-y += venet/
+endif
