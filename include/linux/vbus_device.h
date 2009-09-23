@@ -105,6 +105,7 @@
 #include <linux/ioq.h>
 #include <linux/vbus.h>
 #include <linux/kref.h>
+#include <linux/scatterlist.h>
 
 struct vbus_device_interface;
 struct vbus_connection;
@@ -280,6 +281,9 @@ struct vbus_memctx_ops {
 				   const void *src,
 				   unsigned long len);
 	struct mm_struct *(*mm_get)(struct vbus_memctx *ctx);
+	unsigned long (*sg_map)(struct vbus_memctx *ctx,
+				struct scatterlist *sgl,
+				int nelems);
 	void (*release)(struct vbus_memctx *ctx);
 };
 
