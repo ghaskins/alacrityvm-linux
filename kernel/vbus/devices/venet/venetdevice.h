@@ -86,6 +86,13 @@ struct venetdev {
 			struct vbus_shm     *shm;
 			int                  enabled:1;
 		} pmtd;
+		struct {
+			spinlock_t             lock;
+			struct vbus_shm       *shm;
+			struct venetdev_queue  queue;
+			int                    enabled:1;
+			int                    linkstate:1;
+		} evq;
 		int                          connected:1;
 		int                          opened:1;
 		int                          link:1;

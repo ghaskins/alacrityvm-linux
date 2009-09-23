@@ -244,6 +244,7 @@ venettap_device_create(struct vbus_devclass *dc,
 	memset(priv, 0, sizeof(*priv));
 
 	spin_lock_init(&priv->lock);
+	spin_lock_init(&priv->vbus.evq.lock);
 	random_ether_addr(priv->hmac);
 	random_ether_addr(priv->cmac);
 
