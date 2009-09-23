@@ -206,6 +206,7 @@ static struct attribute *attrs[] = {
 	&attr_enabled.attr,
 	&attr_burstthresh.attr,
 	&attr_txmitigation.attr,
+	&attr_zcthresh.attr,
 	&attr_ifname.attr,
 	NULL,
 };

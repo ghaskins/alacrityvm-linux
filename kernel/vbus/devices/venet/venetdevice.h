@@ -25,6 +25,7 @@
 #define _LINUX_VENETDEVICE_H
 
 #include <linux/venet.h>
+#include <linux/list.h>
 
 struct venetdev_queue {
 	struct ioq              *queue;
@@ -34,8 +35,7 @@ struct venetdev_queue {
 struct venetdev;
 
 struct venetdev_rx_ops {
-	int (*decode)(struct venetdev *priv, void *ptr, int len);
-	int (*import)(struct venetdev *, struct sk_buff *, void *, int);
+	struct sk_buff *(*import)(struct venetdev *, void *, int);
 };
 
 #define MAX_VSG_DESC_SIZE VSG_DESC_SIZE(MAX_SKB_FRAGS)
@@ -64,6 +64,11 @@ struct venetdev {
 			size_t               len;
 			int                  irqdepth;
 		} txq;
+		struct {
+			atomic_t             outstanding;
+			size_t               completed;
+			wait_queue_head_t    wq;
+		} rxq;
 		int                          enabled:1;
 		int                          link:1;
 	} netif;
@@ -92,6 +97,7 @@ struct venetdev {
 			struct venetdev_queue  queue;
 			int                    enabled:1;
 			int                    linkstate:1;
+			int                    txc:1;
 		} evq;
 		int                          connected:1;
 		int                          opened:1;
@@ -103,7 +109,7 @@ struct venetdev {
 		ktime_t                      expires;
 	} burst;
 	int                                  txmitigation;
-
+	int                                  zcthresh;
 };
 
 static inline struct venetdev *conn_to_priv(struct vbus_connection *conn)
@@ -154,5 +160,6 @@ extern struct vbus_device_attribute attr_enabled;
 extern struct vbus_device_attribute attr_burstthresh;
 extern struct vbus_device_attribute attr_ifname;
 extern struct vbus_device_attribute attr_txmitigation;
+extern struct vbus_device_attribute attr_zcthresh;
 
 #endif
