@@ -205,6 +205,15 @@ _memctx_mm_get(struct vbus_memctx *ctx)
 	return mm;
 }
 
+static unsigned long
+_memctx_sg_map(struct vbus_memctx *ctx, struct scatterlist *sgl, int nelems)
+{
+	struct _memctx *_memctx = to_memctx(ctx);
+	struct kvm_xinterface *kvm = _memctx->vkvm->kvm;
+
+	return kvm->ops->sgmap(kvm, sgl, nelems, 0);
+}
+
 static void
 _memctx_release(struct vbus_memctx *ctx)
 {
@@ -218,6 +227,7 @@ static struct vbus_memctx_ops _memctx_ops = {
 	.copy_to   = &_memctx_copy_to,
 	.copy_from = &_memctx_copy_from,
 	.mm_get    = &_memctx_mm_get,
+	.sg_map    = &_memctx_sg_map,
 	.release   = &_memctx_release,
 };
 
