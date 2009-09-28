@@ -585,8 +585,8 @@ out:
 	mutex_unlock(&vbus_root.lock);
 
 	return bus;
-
 }
+EXPORT_SYMBOL_GPL(vbus_find);
 
 struct vbus_root vbus_root;
 
