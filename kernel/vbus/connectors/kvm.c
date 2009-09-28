@@ -15,8 +15,6 @@
 #include <linux/vbus_kvm.h>
 #include <linux/vbus_client.h>
 
-#include "vbus.h"
-
 MODULE_AUTHOR("Gregory Haskins");
 MODULE_LICENSE("GPL");
 
