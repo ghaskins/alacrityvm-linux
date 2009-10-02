@@ -992,7 +992,7 @@ next:
 			evq_send_txc(priv, cookie);
 
 		/* send up to N packets before sending tx-complete */
-		if (dirty && (priv->txmitigation
+		if (dirty && (!priv->txmitigation
 			      || !(npackets % priv->txmitigation))) {
 			ioq_signal(sioq, 0);
 			dirty = 0;
