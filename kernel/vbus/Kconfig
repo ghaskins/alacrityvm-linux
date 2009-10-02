@@ -29,4 +29,3 @@ config VBUS_DEVICES
 
 source "kernel/vbus/devices/Kconfig"
 source "kernel/vbus/connectors/Kconfig"
-

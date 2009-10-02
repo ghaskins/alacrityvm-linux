@@ -3,5 +3,3 @@ obj-$(CONFIG_VBUS) += shm-ioq.o
 
 obj-y += devices/
 obj-y += connectors/
-
-

@@ -1,4 +1,13 @@
 
+config VBUS_NULL
+       tristate "Virtual-Bus NULL connector"
+       depends on VBUS
+       default n
+       help
+         Provides a example connector
+
+	 If unsure, say N
+
 config VBUS_KVM
        tristate "Virtual-Bus connector for KVM"
        depends on VBUS
@@ -7,15 +16,6 @@ config VBUS_KVM
        help
          Provides a connector for allowing KVM guests to access
 	 virtual-bus objects.
-
-	 If unsure, say N
-
-config VBUS_NULL
-       tristate "Virtual-Bus NULL connector"
-       depends on VBUS
-       default n
-       help
-         Provides a example connector
 
 	 If unsure, say N
 
