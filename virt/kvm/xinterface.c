@@ -1,11 +1,6 @@
 /*
  * KVM module interface - Allows external modules to interface with a guest
  *
- * This code is designed to be statically linked to the kernel, regardless
- * of the configuration of kvm.ko.  This allows the kvm_xinterface_find
- * routine to be stably exported without dependencies on, or race conditions
- * against acquiring the kvm.ko module itself.
- *
  * Copyright 2009 Novell.  All Rights Reserved.
  *
  * Author:
@@ -66,7 +61,16 @@ to_intf(struct kvm_xinterface *intf)
 #define _gfn_to_hva(gfn, memslot) \
 	(memslot->userspace_addr + (gfn - memslot->base_gfn) * PAGE_SIZE)
 
-/* assumes slots_lock held for read */
+/*
+ * gpa_to_hva() - translate a guest-physical to host-virtual using
+ * a per-cpu cache of the memslot.
+ *
+ * The gfn_to_memslot() call is relatively expensive, and the gpa access
+ * patterns exhibit a high degree of locality.  Therefore, lets cache
+ * the last slot used on a per-cpu basis to optimize the lookup
+ *
+ * assumes slots_lock held for read
+ */
 static unsigned long
 gpa_to_hva(struct _xinterface *_intf, unsigned long gpa)
 {
@@ -78,9 +82,6 @@ gpa_to_hva(struct _xinterface *_intf, unsigned long gpa)
 	if (!memslot
 	    || gfn < memslot->base_gfn
 	    || gfn >= memslot->base_gfn + memslot->npages) {
-
-		if (memslot)
-			_intf->slotcache[cpu] = NULL;
 
 		memslot = gfn_to_memslot(_intf->kvm, gfn);
 		if (!memslot)
