@@ -5,8 +5,8 @@
 
 #include <linux/mm.h>
 #include <linux/mmu_context.h>
-#include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/module.h>
 
 #include <asm/mmu_context.h>
 
@@ -27,13 +27,16 @@ void use_mm(struct mm_struct *mm)
 
 	task_lock(tsk);
 	active_mm = tsk->active_mm;
-	atomic_inc(&mm->mm_count);
+	if (active_mm != mm) {
+		atomic_inc(&mm->mm_count);
+		tsk->active_mm = mm;
+	}
 	tsk->mm = mm;
-	tsk->active_mm = mm;
 	switch_mm(active_mm, mm, tsk);
 	task_unlock(tsk);
 
-	mmdrop(active_mm);
+	if (active_mm != mm)
+		mmdrop(active_mm);
 }
 EXPORT_SYMBOL_GPL(use_mm);
 
