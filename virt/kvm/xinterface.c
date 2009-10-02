@@ -79,16 +79,13 @@ gpa_to_hva(struct _xinterface *_intf, unsigned long gpa)
 	    || gfn < memslot->base_gfn
 	    || gfn >= memslot->base_gfn + memslot->npages) {
 
-		if (memslot) {
-			atomic_dec(&memslot->refs);
+		if (memslot)
 			_intf->slotcache[cpu] = NULL;
-		}
 
 		memslot = gfn_to_memslot(_intf->kvm, gfn);
 		if (!memslot)
 			goto out;
 
-		atomic_inc(&memslot->refs);
 		_intf->slotcache[cpu] = memslot;
 	}
 
@@ -157,7 +154,6 @@ xvmap_release(struct kvm_xvmap *vmap)
 	struct _xinterface *_intf = to_intf(_xvmap->vmap.intf);
 
 	_vunmap(_intf, _xvmap->vmap.addr, _xvmap->npages);
-	atomic_dec(&_xvmap->memslot->refs);
 	kfree(_xvmap);
 }
 
@@ -355,8 +351,6 @@ xinterface_vmap(struct kvm_xinterface *intf,
 		goto fail;
 	}
 
-	atomic_inc(&memslot->refs);
-
 	_xvmap->memslot = memslot;
 	_xvmap->npages  = npages;
 
@@ -547,16 +541,6 @@ static void
 xinterface_release(struct kvm_xinterface *intf)
 {
 	struct _xinterface *_intf = to_intf(intf);
-	int i;
-
-	for_each_possible_cpu(i) {
-		struct kvm_memory_slot *memslot = _intf->slotcache[i];
-
-		if (memslot) {
-			atomic_dec(&memslot->refs);
-			_intf->slotcache[i] = NULL;
-		}
-	}
 
 	mmput(_intf->mm);
 	put_task_struct(_intf->task);
