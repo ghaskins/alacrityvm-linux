@@ -68,11 +68,16 @@ int eventfd_signal(struct eventfd_ctx *ctx, int n)
 }
 EXPORT_SYMBOL_GPL(eventfd_signal);
 
+static void eventfd_free_ctx(struct eventfd_ctx *ctx)
+{
+	kfree(ctx);
+}
+
 static void eventfd_free(struct kref *kref)
 {
 	struct eventfd_ctx *ctx = container_of(kref, struct eventfd_ctx, kref);
 
-	kfree(ctx);
+	eventfd_free_ctx(ctx);
 }
 
 /**
@@ -298,6 +303,20 @@ struct eventfd_ctx *eventfd_ctx_fileget(struct file *file)
 }
 EXPORT_SYMBOL_GPL(eventfd_ctx_fileget);
 
+/**
+ * eventfd_file_create - Creates an eventfd file pointer.
+ * @count: Initial eventfd counter value.
+ * @flags: Flags for the eventfd file.
+ *
+ * This function creates an eventfd file pointer, w/out installing it into
+ * the fd table. This is useful when the eventfd file is used during the
+ * initialization of data structures that require extra setup after the eventfd
+ * creation. So the eventfd creation is split into the file pointer creation
+ * phase, and the file descriptor installation phase.
+ * In this way races with userspace closing the newly installed file descriptor
+ * can be avoided.
+ * Returns an eventfd file pointer, or a proper error pointer.
+ */
 struct file *eventfd_file_create(unsigned int count, int flags)
 {
 	struct file *file;
@@ -322,11 +341,10 @@ struct file *eventfd_file_create(unsigned int count, int flags)
 	file = anon_inode_getfile("[eventfd]", &eventfd_fops, ctx,
 				  flags & EFD_SHARED_FCNTL_FLAGS);
 	if (IS_ERR(file))
-		kfree(ctx);
+		eventfd_free_ctx(ctx);
 
 	return file;
 }
-EXPORT_SYMBOL_GPL(eventfd_file_create);
 
 SYSCALL_DEFINE2(eventfd2, unsigned int, count, int, flags)
 {

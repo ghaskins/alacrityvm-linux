@@ -79,7 +79,7 @@ static const struct address_space_operations anon_aops = {
  * that do not need to have a full-fledged inode in order to operate correctly.
  * All the files created with anon_inode_getfile() will share a single inode,
  * hence saving memory and avoiding code duplication for the file/inode/dentry
- * setup.  Returns the newly created file* or error.
+ * setup.  Returns the newly created file* or an error pointer.
  */
 struct file *anon_inode_getfile(const char *name,
 				const struct file_operations *fops,
@@ -156,7 +156,7 @@ EXPORT_SYMBOL_GPL(anon_inode_getfile);
  * that do not need to have a full-fledged inode in order to operate correctly.
  * All the files created with anon_inode_getfd() will share a single inode,
  * hence saving memory and avoiding code duplication for the file/inode/dentry
- * setup.  Returns new descriptor or -error.
+ * setup.  Returns new descriptor or an error code.
  */
 int anon_inode_getfd(const char *name, const struct file_operations *fops,
 		     void *priv, int flags)
