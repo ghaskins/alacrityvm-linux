@@ -28,20 +28,12 @@
 int shm_signal_enable(struct shm_signal *s, int flags)
 {
 	struct shm_signal_irq *irq = &s->desc->irq[s->locale];
-	unsigned long iflags;
-
-	spin_lock_irqsave(&s->lock, iflags);
 
 	irq->enabled = 1;
 	wmb();
 
-	if ((irq->dirty || irq->pending)
-	    && !test_bit(shm_signal_in_wakeup, &s->flags)) {
-		rmb();
+	if (!s->in_wakeup && (irq->dirty || irq->pending))
 		tasklet_schedule(&s->deferred_notify);
-	}
-
-	spin_unlock_irqrestore(&s->lock, iflags);
 
 	return 0;
 }
@@ -86,8 +78,6 @@ int shm_signal_inject(struct shm_signal *s, int flags)
 	wmb();   /* dirty must be visible before we test the pending state */
 
 	if (irq->enabled && !irq->pending) {
-		rmb();
-
 		/*
 		 * If the remote side has enabled notifications, and we do
 		 * not see a notification pending, we must inject a new one.
@@ -106,11 +96,8 @@ void _shm_signal_wakeup(struct shm_signal *s)
 {
 	struct shm_signal_irq *irq = &s->desc->irq[s->locale];
 	int dirty;
-	unsigned long flags;
 
-	spin_lock_irqsave(&s->lock, flags);
-
-	__set_bit(shm_signal_in_wakeup, &s->flags);
+	s->in_wakeup = true;
 
 	/*
 	 * The outer loop protects against race conditions between
@@ -127,13 +114,11 @@ void _shm_signal_wakeup(struct shm_signal *s)
 		 */
 		do {
 			irq->dirty = 0;
-			/* the unlock is an implicit wmb() for dirty = 0 */
-			spin_unlock_irqrestore(&s->lock, flags);
+			wmb();
 
 			if (s->notifier)
 				s->notifier->signal(s->notifier);
 
-			spin_lock_irqsave(&s->lock, flags);
 			dirty = irq->dirty;
 			rmb();
 
@@ -155,9 +140,7 @@ void _shm_signal_wakeup(struct shm_signal *s)
 
 	}
 
-	__clear_bit(shm_signal_in_wakeup, &s->flags);
-	spin_unlock_irqrestore(&s->lock, flags);
-
+	s->in_wakeup = false;
 }
 EXPORT_SYMBOL_GPL(_shm_signal_wakeup);
 
@@ -182,7 +165,7 @@ void shm_signal_init(struct shm_signal *s, enum shm_signal_locality locale,
 {
 	memset(s, 0, sizeof(*s));
 	kref_init(&s->kref);
-	spin_lock_init(&s->lock);
+	s->in_wakeup = false;
 	tasklet_init(&s->deferred_notify,
 		     deferred_notify,
 		     (unsigned long)s);

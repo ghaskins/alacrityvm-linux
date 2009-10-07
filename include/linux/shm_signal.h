@@ -75,15 +75,10 @@ struct shm_signal_ops {
 	void     (*release)(struct shm_signal *s);
 };
 
-enum {
-	shm_signal_in_wakeup,
-};
-
 struct shm_signal {
 	struct kref                 kref;
-	spinlock_t                  lock;
 	enum shm_signal_locality    locale;
-	unsigned long               flags;
+	bool                        in_wakeup;
 	struct shm_signal_ops      *ops;
 	struct shm_signal_desc     *desc;
 	struct shm_signal_notifier *notifier;
