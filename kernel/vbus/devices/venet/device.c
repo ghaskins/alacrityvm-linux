@@ -2182,6 +2182,14 @@ venetdev_vlink_release(struct vbus_connection *conn)
 	priv->vbus.evq.enabled = false;
 	priv->vbus.evq.linkstate = false;
 	priv->vbus.evq.txc = false;
+
+	if (priv->vbus.l4ro.shm)
+		vbus_shm_put(priv->vbus.l4ro.shm);
+	if (priv->vbus.l4ro.pageq.queue)
+		venetdev_queue_release(&priv->vbus.l4ro.pageq);
+	priv->vbus.l4ro.shm = NULL;
+	priv->vbus.l4ro.available = false;
+	priv->vbus.l4ro.enabled = false;
 }
 
 /*
