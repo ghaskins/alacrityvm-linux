@@ -202,7 +202,7 @@ rx_pageq_refill(struct vbus_enet_priv *priv)
 		BUG_ON(!page);
 
 		iter.desc->cookie = (u64)page;
-		iter.desc->ptr    = (u64)page_address(page);
+		iter.desc->ptr    = (u64)__pa(page_address(page));
 		iter.desc->len    = PAGE_SIZE;
 
 		ret = ioq_iter_push(&iter, 0);
