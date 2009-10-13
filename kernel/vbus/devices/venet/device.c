@@ -68,6 +68,8 @@ MODULE_PARM_DESC(maxcount, "maximum size for rx/tx ioq ring");
 #define PMTD_POOL_ID 100
 #define EVQ_DPOOL_ID 101
 #define EVQ_QUEUE_ID 102
+#define L4RO_DPOOL_ID 103
+#define L4RO_PAGEQ_ID 104
 
 static void venetdev_tx_isr(struct ioq_notifier *notifier);
 static int venetdev_rx_thread(void *__priv);
@@ -173,6 +175,28 @@ venetdev_evq_queue_init(struct venetdev *priv,
 		priv->vbus.evq.queue.queue = NULL;
 		return -EINVAL;
 	}
+
+	return 0;
+}
+
+static int
+venetdev_l4ro_dpool_init(struct venetdev *priv,
+			struct vbus_shm *shm, struct shm_signal *signal)
+{
+	if (signal || !priv->vbus.l4ro.available)
+		return -EINVAL;
+
+	if (priv->vbus.l4ro.shm)
+		return -EEXIST;
+
+	/*
+	 * Validate that the dpool size is sane w.r.t. the number of
+	 * descriptors in the ring
+	 */
+	if (shm->len > maxcount*MAX_VSG_DESC_SIZE)
+		return -EINVAL;
+
+	priv->vbus.l4ro.shm = shm;
 
 	return 0;
 }
@@ -768,10 +792,6 @@ venetdev_sg_import(struct venetdev *priv, void *ptr, int len)
 	return skb;
 }
 
-static struct venetdev_rx_ops venetdev_sg_rx_ops = {
-	.import = venetdev_sg_import,
-};
-
 /*
  * ---------------------------
  * Flat (non Scatter-Gather) support
@@ -817,10 +837,6 @@ venetdev_flat_import(struct venetdev *priv, void *ptr, int len)
 
 	return skb;
 }
-
-static struct venetdev_rx_ops venetdev_flat_rx_ops = {
-	.import = venetdev_flat_import,
-};
 
 static void
 venetdev_skb_release(struct sk_buff *skb)
@@ -894,7 +910,6 @@ venetdev_rx(struct venetdev *priv)
 	int                         ret;
 	unsigned long               flags;
 	struct vbus_connection     *conn;
-	struct venetdev_rx_ops     *rx_ops;
 
 	PDEBUG("polling...\n");
 
@@ -923,8 +938,6 @@ venetdev_rx(struct venetdev *priv)
 
 	ctx = priv->vbus.ctx;
 
-	rx_ops = priv->vbus.rx_ops;
-
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	/* We want to iterate on the head of the in-use index */
@@ -944,9 +957,9 @@ venetdev_rx(struct venetdev *priv)
 		bool async = false;
 		u64 cookie = 0;
 
-		skb = rx_ops->import(priv,
-				     (void *)iter.desc->ptr,
-				     iter.desc->len);
+		skb = priv->vbus.import(priv,
+					(void *)iter.desc->ptr,
+					iter.desc->len);
 		if (unlikely(!skb)) {
 			priv->netif.stats.rx_errors++;
 			goto next;
@@ -1073,8 +1086,151 @@ venetdev_check_netif_congestion(struct venetdev *priv)
 	}
 }
 
+/*
+ *-----------------------------------------------------------
+ * tx logic
+ *-----------------------------------------------------------
+ */
+
+struct venet_txstream {
+	struct venetdev       *priv;
+	struct ioq_ring_desc  *desc;
+	int (*write)(struct venet_txstream *str, const void *src,
+		     unsigned long len);
+};
+
+/* flat_txstream: handles linear descriptors */
+struct venet_flat_txstream {
+	void                  *dst;
+	struct venet_txstream  txstream;
+};
+
+static struct venet_flat_txstream *
+to_flat_txstream(struct venet_txstream *txstream)
+{
+	return container_of(txstream, struct venet_flat_txstream, txstream);
+}
+
 static int
-nonlinear_copy_to(struct vbus_memctx *ctx, void *dst, struct sk_buff *skb)
+flat_txstream_write(struct venet_txstream *str, const void *src,
+		    unsigned long len)
+{
+	struct venet_flat_txstream *_str = to_flat_txstream(str);
+	struct vbus_memctx *ctx = str->priv->vbus.ctx;
+	int bytes;
+	int ret;
+
+	PDEBUG("copy %d bytes: %p to %p\n",
+	       len, src, _str->dst);
+
+	ret = ctx->ops->copy_to(ctx, _str->dst, src, len);
+	if (ret < 0)
+		return ret;
+
+	bytes = len - ret;
+
+	_str->dst += bytes;
+	str->desc->len += bytes;
+
+	PDEBUG("%d bytes remain\n", ret);
+
+	return ret;
+}
+
+/* sg_txstream: handles non-linear descriptors */
+struct venet_sg_txstream {
+	struct venet_sg       *vsg;
+	void                  *dst;
+	size_t                 remain;
+	int                    index;
+	struct venet_txstream  txstream;
+};
+
+static struct venet_sg_txstream *
+to_sg_txstream(struct venet_txstream *txstream)
+{
+	return container_of(txstream, struct venet_sg_txstream, txstream);
+}
+
+/*
+ * We ran out of space, so we need to grab another
+ * buffer from the page-queue and tack it on the end
+ */
+static void
+sg_txstream_replenish(struct venet_sg_txstream *_str)
+{
+	struct venetdev    *priv = _str->txstream.priv;
+	struct venet_sg    *vsg = _str->vsg;
+	struct venet_iov   *iov = &vsg->iov[++_str->index];
+	struct ioq         *ioq = priv->vbus.l4ro.pageq.queue;
+	struct ioq_iterator iter;
+	int                 ret;
+
+	PDEBUG("replenish stream\n");
+
+	ret = ioq_iter_init(ioq, &iter, ioq_idxtype_inuse, 0);
+	BUG_ON(ret < 0);
+
+	ret = ioq_iter_seek(&iter, ioq_seek_head, 0, 0);
+	BUG_ON(ret < 0);
+
+	if (!iter.desc->sown) {
+		/* There are no more pages available, so we will wait */
+		ioq_notify_enable(ioq, 0);
+		wait_event(ioq->wq, iter.desc->sown);
+		ioq_notify_disable(ioq, 0);
+	}
+
+	_str->dst    = (void *)iter.desc->ptr;
+	_str->remain = iter.desc->len;
+	iov->ptr     = iter.desc->cookie;
+	iov->len     = 0;
+	vsg->count++;
+
+	ret = ioq_iter_pop(&iter, 0);
+	BUG_ON(ret < 0);
+}
+
+static int
+sg_txstream_write(struct venet_txstream *str, const void *src, unsigned long len)
+{
+	struct venet_sg_txstream *_str = to_sg_txstream(str);
+	struct vbus_memctx       *ctx  = str->priv->vbus.ctx;
+	struct venet_sg          *vsg  = _str->vsg;
+	int                       ret;
+
+	while (len) {
+		struct venet_iov *iov         = &vsg->iov[_str->index];
+		int               bytestocopy = min(len, _str->remain);
+
+		if (!bytestocopy) {
+			sg_txstream_replenish(_str);
+			continue;
+		}
+
+		PDEBUG("copy %d bytes: %p to %p\n",
+		       bytestocopy, src, _str->dst);
+
+		ret = ctx->ops->copy_to(ctx, _str->dst, src, bytestocopy);
+		if (ret)
+			break;
+
+		_str->dst    += bytestocopy;
+		_str->remain -= bytestocopy;
+		src          += bytestocopy;
+		len          -= bytestocopy;
+		vsg->len     += bytestocopy;
+		iov->len     += bytestocopy;
+	}
+
+	PDEBUG("complete with %d bytes remain\n", len);
+
+	return len;
+}
+
+/* handles streaming fragmented packets */
+static int
+skb_nonlinear_stream(struct venet_txstream *str, struct sk_buff *skb)
 {
 	struct scatterlist sgl[MAX_SKB_FRAGS+1];
 	struct scatterlist *sg;
@@ -1088,16 +1244,15 @@ nonlinear_copy_to(struct vbus_memctx *ctx, void *dst, struct sk_buff *skb)
 	count = skb_to_sgvec(skb, sgl, 0, skb->len);
 	BUG_ON(count > maxcount);
 
-	/* linearize the payload directly into the queue */
+	/* linearize the payload directly into the stream */
 	for_each_sg(sgl, sg, count, i) {
 		size_t len = sg->length;
 		void *src  = sg_virt(sg);
 
-		ret = ctx->ops->copy_to(ctx, dst, src, len);
+		ret = str->write(str, src, len);
 		if (ret)
 			break;
 
-		dst += len;
 		bytes += len;
 	}
 
@@ -1105,9 +1260,105 @@ nonlinear_copy_to(struct vbus_memctx *ctx, void *dst, struct sk_buff *skb)
 }
 
 static int
-linear_copy_to(struct vbus_memctx *ctx, void *dst, struct sk_buff *skb)
+skb_to_txstream(struct venet_txstream *str, struct sk_buff *skb)
 {
-	return ctx->ops->copy_to(ctx, dst, skb->data, skb->len);
+	int ret;
+
+	if (!skb_shinfo(skb)->nr_frags) {
+		PDEBUG("linear SKB detected\n");
+		ret = str->write(str, skb->data, skb->len);
+	} else {
+		PDEBUG("non-linear SKB detected\n");
+		ret = skb_nonlinear_stream(str, skb);
+	}
+
+	return ret;
+}
+
+static int
+venetdev_flat_export(struct venetdev *priv,
+		     struct ioq_ring_desc *desc,
+		     struct sk_buff *skb)
+{
+	struct venet_flat_txstream _str = {
+		.dst = (void *)desc->ptr,
+		.txstream = {
+			.priv = priv,
+			.desc = desc,
+			.write = &flat_txstream_write,
+		},
+	};
+
+	if (skb->len > desc->len)
+		return skb->len;
+
+	desc->len = 0;
+
+	return skb_to_txstream(&_str.txstream, skb);
+}
+
+static int
+venetdev_sg_export(struct venetdev *priv,
+		   struct ioq_ring_desc *desc,
+		   struct sk_buff *skb)
+{
+	void *_vsg = priv->vbus.l4ro.shm->ptr + (size_t)desc->ptr;
+	struct venet_sg *vsg = (struct venet_sg *)_vsg;
+	struct venet_iov *iov = &vsg->iov[0];
+	struct venet_sg_txstream _str = {
+		.vsg = vsg,
+		.dst = (void *)iov->ptr,
+		.remain = iov->len,
+		.index = 0,
+		.txstream = {
+			.priv = priv,
+			.desc = desc,
+			.write = &sg_txstream_write,
+		},
+	};
+
+	PDEBUG("sg-export: %d bytes\n", skb->len);
+
+	if (!skb_is_gso(skb) && skb->len > iov->len) {
+		PDEBUG("skb is larger than mtu: %d/%d\n", skb->len, iov->len);
+		return skb->len;
+	}
+
+	vsg->len   = 0;
+	vsg->count = 1;
+	iov->len   = 0;
+
+	if (skb->ip_summed == CHECKSUM_PARTIAL) {
+		PDEBUG("needs csum\n");
+		vsg->flags      |= VENET_SG_FLAG_NEEDS_CSUM;
+		vsg->csum.start  = skb->csum_start - skb_headroom(skb);
+		vsg->csum.offset = skb->csum_offset;
+	}
+
+	if (skb_is_gso(skb)) {
+		struct skb_shared_info *sinfo = skb_shinfo(skb);
+
+		PDEBUG("L4RO frame\n");
+
+		vsg->flags |= VENET_SG_FLAG_GSO;
+
+		vsg->gso.hdrlen = skb_headlen(skb);
+		vsg->gso.size = sinfo->gso_size;
+		if (sinfo->gso_type & SKB_GSO_TCPV4)
+			vsg->gso.type = VENET_GSO_TYPE_TCPV4;
+		else if (sinfo->gso_type & SKB_GSO_TCPV6)
+			vsg->gso.type = VENET_GSO_TYPE_TCPV6;
+		else if (sinfo->gso_type & SKB_GSO_UDP)
+			vsg->gso.type = VENET_GSO_TYPE_UDP;
+		else
+			panic("Virtual-Ethernet: unknown GSO type "	\
+			      "0x%x\n", sinfo->gso_type);
+
+		if (sinfo->gso_type & SKB_GSO_TCP_ECN)
+			vsg->flags |= VENET_SG_FLAG_ECN;
+	}
+
+	return skb_to_txstream(&_str.txstream, skb);
 }
 
 static int
@@ -1151,7 +1402,6 @@ venetdev_tx(struct venetdev *priv)
 	BUG_ON(ret < 0);
 
 	while (priv->vbus.link && iter.desc->sown && priv->netif.txq.len) {
-		bool sent = false;
 
 		skb = __skb_dequeue(&priv->netif.txq.list);
 		if (!skb)
@@ -1161,29 +1411,15 @@ venetdev_tx(struct venetdev *priv)
 
 		PDEBUG("tx-thread: sending %d bytes\n", skb->len);
 
-		if (skb->len <= iter.desc->len) {
-			void *dst = (void *)iter.desc->ptr;
+		ret = priv->vbus.export(priv, iter.desc, skb);
+		if (!ret) {
+			npackets++;
+			priv->netif.stats.tx_packets++;
+			priv->netif.stats.tx_bytes += skb->len;
 
-			if (!skb_shinfo(skb)->nr_frags)
-				ret = linear_copy_to(ctx, dst, skb);
-			else
-				ret = nonlinear_copy_to(ctx, dst, skb);
-
-			if (!ret) {
-				iter.desc->len = skb->len;
-
-				npackets++;
-				priv->netif.stats.tx_packets++;
-				priv->netif.stats.tx_bytes += skb->len;
-
-				ret = ioq_iter_push(&iter, 0);
-				BUG_ON(ret < 0);
-
-				sent = true;
-			}
-		}
-
-		if (!sent)
+			ret = ioq_iter_push(&iter, 0);
+			BUG_ON(ret < 0);
+		} else
 			priv->netif.stats.tx_errors++;
 
 		dev_kfree_skb(skb);
@@ -1544,7 +1780,7 @@ venetdev_negcap_sg(struct venetdev *priv, u32 requested)
 
 	if (ret & VENET_CAP_SG) {
 		priv->vbus.sg.enabled = true;
-		priv->vbus.rx_ops = &venetdev_sg_rx_ops;
+		priv->vbus.import = &venetdev_sg_import;
 	}
 
 	if (ret & VENET_CAP_PMTD)
@@ -1568,6 +1804,36 @@ venetdev_negcap_evq(struct venetdev *priv, u32 requested)
 			priv->vbus.evq.linkstate = true;
 		if (ret & VENET_CAP_EVQ_TXC)
 			priv->vbus.evq.txc = true;
+	}
+
+	return ret;
+}
+
+static u32
+venetdev_negcap_l4ro(struct venetdev *priv, u32 requested)
+{
+	u32 available = VENET_CAP_SG|VENET_CAP_TSO4|VENET_CAP_TSO6
+		|VENET_CAP_ECN;
+	u32 ret;
+
+	ret = available & requested;
+
+	if (ret & VENET_CAP_SG) {
+		struct net_device *dev = priv->netif.dev;
+
+		priv->vbus.l4ro.available = true;
+		priv->vbus.export = &venetdev_sg_export;
+
+		dev->features |= NETIF_F_SG|NETIF_F_HW_CSUM|NETIF_F_FRAGLIST;
+
+		if (ret & VENET_CAP_TSO4)
+			dev->features |= NETIF_F_TSO;
+		if (ret & VENET_CAP_UFO)
+			dev->features |= NETIF_F_UFO;
+		if (ret & VENET_CAP_TSO6)
+			dev->features |= NETIF_F_TSO6;
+		if (ret & VENET_CAP_ECN)
+			dev->features |= NETIF_F_TSO_ECN;
 	}
 
 	return ret;
@@ -1605,6 +1871,9 @@ venetdev_negcap(struct venetdev *priv, void *data, unsigned long len)
 		break;
 	case VENET_CAP_GROUP_EVENTQ:
 		caps.bits = venetdev_negcap_evq(priv, caps.bits);
+		break;
+	case VENET_CAP_GROUP_L4RO:
+		caps.bits = venetdev_negcap_l4ro(priv, caps.bits);
 		break;
 	default:
 		caps.bits = 0;
@@ -1684,7 +1953,8 @@ venetdev_flushrx(struct venetdev *priv)
 
 void venetdev_init(struct venetdev *device, struct net_device *dev)
 {
-	device->vbus.rx_ops      = &venetdev_flat_rx_ops;
+	device->vbus.import      = &venetdev_flat_import;
+	device->vbus.export      = &venetdev_flat_export;
 	init_waitqueue_head(&device->vbus.rx_empty);
 	device->burst.thresh     = 0; /* microseconds, 0 = disabled */
 	device->txmitigation     = 10; /* nr-packets, 0 = disabled */
@@ -1742,6 +2012,36 @@ venetdev_evqquery(struct venetdev *priv, void *data, unsigned long len)
 	return 0;
 }
 
+static int
+venetdev_l4roquery(struct venetdev *priv, void *data, unsigned long len)
+{
+	struct vbus_memctx *ctx = priv->vbus.ctx;
+	struct venet_l4ro_query query;
+	int ret;
+
+	if (len != sizeof(query))
+		return -EINVAL;
+
+	if (priv->vbus.link)
+		return -EINVAL;
+
+	ret = ctx->ops->copy_from(ctx, &query, data, sizeof(query));
+	if (ret)
+		return -EFAULT;
+
+	if (query.flags)
+		return -EINVAL;
+
+	query.dpid   = L4RO_DPOOL_ID;
+	query.pqid   = L4RO_PAGEQ_ID;
+
+	ret = ctx->ops->copy_to(ctx, data, &query, sizeof(query));
+	if (ret)
+		return -EFAULT;
+
+	return 0;
+}
+
 /*
  * This is called whenever a driver wants to perform a synchronous
  * "function call" to our device.  It is similar to the notion of
@@ -1774,6 +2074,8 @@ venetdev_vlink_call(struct vbus_connection *conn,
 		return PMTD_POOL_ID;
 	case VENET_FUNC_EVQQUERY:
 		return venetdev_evqquery(priv, data, len);
+	case VENET_FUNC_L4ROQUERY:
+		return venetdev_l4roquery(priv, data, len);
 	default:
 		return -EINVAL;
 	}
@@ -1798,7 +2100,7 @@ venetdev_vlink_shm(struct vbus_connection *conn,
 {
 	struct venetdev *priv = conn_to_priv(conn);
 
-	PDEBUG("queue -> %p/%d attached\n", ioq, id);
+	PDEBUG("queue -> %p/%d attached\n", shm, id);
 
 	switch (id) {
 	case VENET_QUEUE_RX:
@@ -1813,6 +2115,11 @@ venetdev_vlink_shm(struct vbus_connection *conn,
 		return venetdev_evq_dpool_init(priv, shm, signal);
 	case EVQ_QUEUE_ID:
 		return venetdev_evq_queue_init(priv, shm, signal);
+	case L4RO_DPOOL_ID:
+		return venetdev_l4ro_dpool_init(priv, shm, signal);
+	case L4RO_PAGEQ_ID:
+		return venetdev_queue_init(&priv->vbus.l4ro.pageq, shm, signal,
+					   NULL);
 	default:
 		return -EINVAL;
 	}
@@ -1858,7 +2165,8 @@ venetdev_vlink_release(struct vbus_connection *conn)
 	kobject_put(priv->vbus.dev.kobj);
 
 	priv->vbus.sg.enabled = false;
-	priv->vbus.rx_ops = &venetdev_flat_rx_ops;
+	priv->vbus.import = &venetdev_flat_import;
+	priv->vbus.export = &venetdev_flat_export;
 	priv->vbus.sg.len = 0;
 
 	if (priv->vbus.pmtd.shm)

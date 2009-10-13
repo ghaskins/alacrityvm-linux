@@ -34,10 +34,6 @@ struct venetdev_queue {
 
 struct venetdev;
 
-struct venetdev_rx_ops {
-	struct sk_buff *(*import)(struct venetdev *, void *, int);
-};
-
 #define MAX_VSG_DESC_SIZE VSG_DESC_SIZE(MAX_SKB_FRAGS)
 
 enum {
@@ -80,7 +76,11 @@ struct venetdev {
 		struct vbus_memctx          *ctx;
 		struct venetdev_queue        rxq;
 		struct venetdev_queue        txq;
-		struct venetdev_rx_ops      *rx_ops;
+
+		struct sk_buff *(*import)(struct venetdev *, void *, int);
+		int (*export)(struct venetdev *, struct ioq_ring_desc *,
+			      struct sk_buff *);
+
 		wait_queue_head_t            rx_empty;
 		struct {
 			char                 buf[MAX_VSG_DESC_SIZE];
@@ -99,6 +99,12 @@ struct venetdev {
 			int                    linkstate:1;
 			int                    txc:1;
 		} evq;
+		struct {
+			struct vbus_shm       *shm;
+			struct venetdev_queue  pageq;
+			int                    available:1;
+			int                    enabled:1;
+		} l4ro;
 		int                          connected:1;
 		int                          opened:1;
 		int                          link:1;
