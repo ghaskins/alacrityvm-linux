@@ -425,9 +425,8 @@ static void apic_set_eoi(struct kvm_lapic *apic)
 		trigger_mode = IOAPIC_LEVEL_TRIG;
 	else
 		trigger_mode = IOAPIC_EDGE_TRIG;
-	mutex_lock(&apic->vcpu->kvm->irq_lock);
+
 	kvm_ioapic_update_eoi(apic->vcpu->kvm, vector, trigger_mode);
-	mutex_unlock(&apic->vcpu->kvm->irq_lock);
 }
 
 static void apic_send_ipi(struct kvm_lapic *apic)

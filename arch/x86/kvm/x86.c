@@ -1776,9 +1776,7 @@ static int kvm_vm_ioctl_get_irqchip(struct kvm *kvm, struct kvm_irqchip *chip)
 			sizeof(struct kvm_pic_state));
 		break;
 	case KVM_IRQCHIP_IOAPIC:
-		memcpy(&chip->chip.ioapic,
-			ioapic_irqchip(kvm),
-			sizeof(struct kvm_ioapic_state));
+		r = kvm_get_ioapic(kvm, &chip->chip.ioapic);
 		break;
 	default:
 		r = -EINVAL;
@@ -1804,9 +1802,7 @@ static int kvm_vm_ioctl_set_irqchip(struct kvm *kvm, struct kvm_irqchip *chip)
 			sizeof(struct kvm_pic_state));
 		break;
 	case KVM_IRQCHIP_IOAPIC:
-		memcpy(ioapic_irqchip(kvm),
-			&chip->chip.ioapic,
-			sizeof(struct kvm_ioapic_state));
+		r = kvm_set_ioapic(kvm, &chip->chip.ioapic);
 		break;
 	default:
 		r = -EINVAL;

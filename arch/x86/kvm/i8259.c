@@ -202,16 +202,18 @@ int kvm_pic_set_irq(void *opaque, int irq, int level)
 static inline void pic_intack(struct kvm_kpic_state *s, int irq)
 {
 	s->isr |= 1 << irq;
-	if (s->auto_eoi) {
-		if (s->rotate_on_auto_eoi)
-			s->priority_add = (irq + 1) & 7;
-		pic_clear_isr(s, irq);
-	}
 	/*
 	 * We don't clear a level sensitive interrupt here
 	 */
 	if (!(s->elcr & (1 << irq)))
 		s->irr &= ~(1 << irq);
+
+	if (s->auto_eoi) {
+		if (s->rotate_on_auto_eoi)
+			s->priority_add = (irq + 1) & 7;
+		pic_clear_isr(s, irq);
+	}
+
 }
 
 int kvm_pic_read_irq(struct kvm *kvm)
@@ -325,9 +327,9 @@ static void pic_ioport_write(void *opaque, u32 addr, u32 val)
 				priority = get_priority(s, s->isr);
 				if (priority != 8) {
 					irq = (priority + s->priority_add) & 7;
-					pic_clear_isr(s, irq);
 					if (cmd == 5)
 						s->priority_add = (irq + 1) & 7;
+					pic_clear_isr(s, irq);
 					pic_update_irq(s->pics_state);
 				}
 				break;
