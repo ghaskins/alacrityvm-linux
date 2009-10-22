@@ -171,6 +171,23 @@ int kvm_set_irq(struct kvm *kvm, int irq_source_id, u32 irq, int level)
 	return ret;
 }
 
+int kvm_irq_check_lockless(struct kvm *kvm, u32 irq)
+{
+	struct kvm_kernel_irq_routing_entry *e;
+	struct kvm_irq_routing_table *irq_rt;
+	struct hlist_node *n;
+	int ret = -ENOENT;
+
+	rcu_read_lock();
+	irq_rt = rcu_dereference(kvm->irq_routing);
+	if (irq < irq_rt->nr_rt_entries)
+		hlist_for_each_entry(e, n, &irq_rt->map[irq], link)
+			ret = e->lockless ? 1 : 0;
+	rcu_read_unlock();
+
+	return ret;
+}
+
 void kvm_notify_acked_irq(struct kvm *kvm, unsigned irqchip, unsigned pin)
 {
 	struct kvm_irq_ack_notifier *kian;
@@ -309,6 +326,7 @@ static int setup_routing_entry(struct kvm_irq_routing_table *rt,
 
 	e->gsi = ue->gsi;
 	e->type = ue->type;
+	e->lockless = false;
 	switch (ue->type) {
 	case KVM_IRQ_ROUTING_IRQCHIP:
 		delta = 0;
@@ -337,6 +355,7 @@ static int setup_routing_entry(struct kvm_irq_routing_table *rt,
 		e->msi.address_lo = ue->u.msi.address_lo;
 		e->msi.address_hi = ue->u.msi.address_hi;
 		e->msi.data = ue->u.msi.data;
+		e->lockless = true;
 		break;
 	default:
 		goto out;

@@ -49,8 +49,12 @@ struct _irqfd {
 	poll_table                pt;
 	wait_queue_head_t        *wqh;
 	wait_queue_t              wait;
+	struct work_struct        inject;
 	struct work_struct        shutdown;
+	void (*execute)(struct _irqfd *);
 };
+
+static struct workqueue_struct *irqfd_cleanup_wq;
 
 static void
 irqfd_inject(struct _irqfd *irqfd)
@@ -59,6 +63,20 @@ irqfd_inject(struct _irqfd *irqfd)
 
 	kvm_set_irq(kvm, KVM_USERSPACE_IRQ_SOURCE_ID, irqfd->gsi, 1);
 	kvm_set_irq(kvm, KVM_USERSPACE_IRQ_SOURCE_ID, irqfd->gsi, 0);
+}
+
+static void
+irqfd_deferred_inject(struct work_struct *work)
+{
+	struct _irqfd *irqfd = container_of(work, struct _irqfd, inject);
+
+	irqfd_inject(irqfd);
+}
+
+static void
+irqfd_schedule(struct _irqfd *irqfd)
+{
+	schedule_work(&irqfd->inject);
 }
 
 /*
@@ -74,6 +92,12 @@ irqfd_shutdown(struct work_struct *work)
 	 * further events.
 	 */
 	remove_wait_queue(irqfd->wqh, &irqfd->wait);
+
+	/*
+	 * We know no new events will be scheduled at this point, so block
+	 * until all previously outstanding events have completed
+	 */
+	flush_work(&irqfd->inject);
 
 	/*
 	 * It is now safe to release the object's resources
@@ -102,7 +126,7 @@ irqfd_deactivate(struct _irqfd *irqfd)
 
 	list_del_init(&irqfd->list);
 
-	schedule_work(&irqfd->shutdown);
+	queue_work(irqfd_cleanup_wq, &irqfd->shutdown);
 }
 
 /*
@@ -116,7 +140,7 @@ irqfd_wakeup(wait_queue_t *wait, unsigned mode, int sync, void *key)
 
 	if (flags & POLLIN)
 		/* An event has been signaled, inject an interrupt */
-		irqfd_inject(irqfd);
+		irqfd->execute(irqfd);
 
 	if (flags & POLLHUP) {
 		/* The eventfd is closing, detach from KVM */
@@ -169,6 +193,7 @@ kvm_irqfd_assign(struct kvm *kvm, int fd, int gsi)
 	irqfd->kvm = kvm;
 	irqfd->gsi = gsi;
 	INIT_LIST_HEAD(&irqfd->list);
+	INIT_WORK(&irqfd->inject, irqfd_inject);
 	INIT_WORK(&irqfd->shutdown, irqfd_shutdown);
 
 	file = eventfd_fget(fd);
@@ -198,12 +223,21 @@ kvm_irqfd_assign(struct kvm *kvm, int fd, int gsi)
 	list_add_tail(&irqfd->list, &kvm->irqfds.items);
 	spin_unlock_irq(&kvm->irqfds.lock);
 
+	ret = kvm_irq_check_lockless(kvm, gsi);
+	if (ret < 0)
+		goto fail;
+
+	if (ret)
+		irqfd->execute = &irqfd_inject;
+	else
+		irqfd->execute = &irqfd_schedule;
+
 	/*
 	 * Check if there was an event already pending on the eventfd
 	 * before we registered, and trigger it as if we didn't miss it.
 	 */
 	if (events & POLLIN)
-		irqfd_inject(irqfd);
+		schedule_work(&irqfd->inject);
 
 	/*
 	 * do not drop the file until the irqfd is fully initialized, otherwise
@@ -260,7 +294,7 @@ kvm_irqfd_deassign(struct kvm *kvm, int fd, int gsi)
 	 * so that we guarantee there will not be any more interrupts on this
 	 * gsi once this deassign function returns.
 	 */
-	flush_scheduled_work();
+	flush_workqueue(irqfd_cleanup_wq);
 
 	return 0;
 }
@@ -294,9 +328,31 @@ kvm_irqfd_release(struct kvm *kvm)
 	 * Block until we know all outstanding shutdown jobs have completed
 	 * since we do not take a kvm* reference.
 	 */
-	flush_scheduled_work();
+	flush_workqueue(irqfd_cleanup_wq);
 
 }
+
+/*
+ * create a host-wide workqueue for issuing deferred shutdown requests
+ * aggregated from all vm* instances. We need our own isolated single-thread
+ * queue to prevent deadlock against flushing the normal work-queue.
+ */
+static int __init irqfd_module_init(void)
+{
+	irqfd_cleanup_wq = create_singlethread_workqueue("kvm-irqfd-cleanup");
+	if (!irqfd_cleanup_wq)
+		return -ENOMEM;
+
+	return 0;
+}
+
+static void __exit irqfd_module_exit(void)
+{
+	destroy_workqueue(irqfd_cleanup_wq);
+}
+
+module_init(irqfd_module_init);
+module_exit(irqfd_module_exit);
 
 /*
  * --------------------------------------------------------------------
