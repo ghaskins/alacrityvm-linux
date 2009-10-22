@@ -1024,7 +1024,8 @@ next:
 	if (ioq_empty(ioq, ioq_idxtype_inuse)) {
 		clear_bit(RX_SCHED, &priv->flags);
 		ioq_notify_enable(ioq, 0);
-		wake_up(&priv->vbus.rx_empty);
+		if (waitqueue_active(&priv->vbus.rx_empty))
+			wake_up(&priv->vbus.rx_empty);
 	}
 
 	vbus_connection_put(conn);
