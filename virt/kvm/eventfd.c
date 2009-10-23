@@ -193,7 +193,7 @@ kvm_irqfd_assign(struct kvm *kvm, int fd, int gsi)
 	irqfd->kvm = kvm;
 	irqfd->gsi = gsi;
 	INIT_LIST_HEAD(&irqfd->list);
-	INIT_WORK(&irqfd->inject, irqfd_inject);
+	INIT_WORK(&irqfd->inject, irqfd_deferred_inject);
 	INIT_WORK(&irqfd->shutdown, irqfd_shutdown);
 
 	file = eventfd_fget(fd);
