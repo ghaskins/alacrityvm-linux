@@ -143,30 +143,29 @@ static int kvm_set_msi(struct kvm_kernel_irq_routing_entry *e,
  */
 int kvm_set_irq(struct kvm *kvm, int irq_source_id, u32 irq, int level)
 {
-	struct kvm_kernel_irq_routing_entry *e, irq_set[KVM_NR_IRQCHIPS];
-	int ret = -1, i = 0;
+	struct kvm_kernel_irq_routing_entry *e;
+	int ret = -1;
 	struct kvm_irq_routing_table *irq_rt;
 	struct hlist_node *n;
+	int idx;
 
 	/* Not possible to detect if the guest uses the PIC or the
 	 * IOAPIC.  So set the bit in both. The guest will ignore
 	 * writes to the unused one.
 	 */
-	rcu_read_lock();
-	irq_rt = rcu_dereference(kvm->irq_routing);
+	idx = srcu_read_lock(&kvm->irq_routing.srcu);
+	irq_rt = rcu_dereference(kvm->irq_routing.table);
 	if (irq < irq_rt->nr_rt_entries)
-		hlist_for_each_entry(e, n, &irq_rt->map[irq], link)
-			irq_set[i++] = *e;
-	rcu_read_unlock();
+		hlist_for_each_entry(e, n, &irq_rt->map[irq], link) {
+			int r;
 
-	while(i--) {
-		int r;
-		r = irq_set[i].set(&irq_set[i], kvm, irq_source_id, level);
-		if (r < 0)
-			continue;
+			r = e->set(e, kvm, irq_source_id, level);
+			if (r < 0)
+				continue;
 
-		ret = r + ((ret < 0) ? 0 : ret);
-	}
+			ret = r + ((ret < 0) ? 0 : ret);
+		}
+	srcu_read_unlock(&kvm->irq_routing.srcu, idx);
 
 	return ret;
 }
@@ -177,9 +176,10 @@ int kvm_irq_check_lockless(struct kvm *kvm, u32 irq)
 	struct kvm_irq_routing_table *irq_rt;
 	struct hlist_node *n;
 	int ret = -ENOENT;
+	int idx;
 
-	rcu_read_lock();
-	irq_rt = rcu_dereference(kvm->irq_routing);
+	idx = srcu_read_lock(&kvm->irq_routing.srcu);
+	irq_rt = rcu_dereference(kvm->irq_routing.table);
 	if (irq < irq_rt->nr_rt_entries)
 		hlist_for_each_entry(e, n, &irq_rt->map[irq], link) {
 			if (!e->lockless) {
@@ -194,7 +194,7 @@ int kvm_irq_check_lockless(struct kvm *kvm, u32 irq)
 
 			ret = 1;
 		}
-	rcu_read_unlock();
+	srcu_read_unlock(&kvm->irq_routing.srcu, idx);
 
 	return ret;
 }
@@ -204,15 +204,16 @@ void kvm_notify_acked_irq(struct kvm *kvm, unsigned irqchip, unsigned pin)
 	struct kvm_irq_ack_notifier *kian;
 	struct hlist_node *n;
 	int gsi;
+	int idx;
 
-	rcu_read_lock();
-	gsi = rcu_dereference(kvm->irq_routing)->chip[irqchip][pin];
+	idx = srcu_read_lock(&kvm->irq_routing.srcu);
+	gsi = rcu_dereference(kvm->irq_routing.table)->chip[irqchip][pin];
 	if (gsi != -1)
 		hlist_for_each_entry_rcu(kian, n, &kvm->irq_ack_notifier_list,
 					 link)
 			if (kian->gsi == gsi)
 				kian->irq_acked(kian);
-	rcu_read_unlock();
+	srcu_read_unlock(&kvm->irq_routing.srcu, idx);
 }
 
 void kvm_register_irq_ack_notifier(struct kvm *kvm,
@@ -310,11 +311,19 @@ void kvm_fire_mask_notifiers(struct kvm *kvm, int irq, bool mask)
 	rcu_read_unlock();
 }
 
+void kvm_init_irq_routing(struct kvm *kvm)
+{
+	init_srcu_struct(&kvm->irq_routing.srcu);
+}
+
 void kvm_free_irq_routing(struct kvm *kvm)
 {
 	/* Called only during vm destruction. Nobody can use the pointer
 	   at this stage */
-	kfree(kvm->irq_routing);
+	synchronize_srcu(&kvm->irq_routing.srcu);
+	cleanup_srcu_struct(&kvm->irq_routing.srcu);
+
+	kfree(kvm->irq_routing.table);
 }
 
 static int setup_routing_entry(struct kvm_irq_routing_table *rt,
@@ -423,10 +432,10 @@ int kvm_set_irq_routing(struct kvm *kvm,
 	}
 
 	mutex_lock(&kvm->irq_lock);
-	old = kvm->irq_routing;
-	rcu_assign_pointer(kvm->irq_routing, new);
+	old = kvm->irq_routing.table;
+	rcu_assign_pointer(kvm->irq_routing.table, new);
 	mutex_unlock(&kvm->irq_lock);
-	synchronize_rcu();
+	synchronize_srcu(&kvm->irq_routing.srcu);
 
 	new = old;
 	r = 0;
