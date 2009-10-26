@@ -593,9 +593,20 @@ venetdev_sg_import_zc(struct venetdev *priv,
 	struct scatterlist sgl[vsg->count];
 	struct scatterlist *sg;
 	struct _venetdev_skb *_skb;
+	int maxoutstanding = ioq_size(priv->vbus.rxq.queue);
 	int nr_addrs = 0;
 	int i;
 	int ret;
+
+	/*
+	 * We backpressure the queue (by sleeping) if we have too many
+	 * outstanding packets.   The backpressure if relieved as the
+	 * packets complete
+	 */
+	if (atomic_read(&priv->netif.rxq.outstanding) >= maxoutstanding) {
+		wait_event(priv->netif.rxq.wq,
+			   (atomic_read(&priv->netif.rxq.outstanding) < maxoutstanding));
+	}
 
 	venet_sg_iter_init(&iter, vsg, priv->vbus.ctx);
 
@@ -851,16 +862,17 @@ venetdev_skb_release(struct sk_buff *skb)
 
 	evq_send_txc(priv, _skb->cookie);
 
-	if (atomic_dec_and_test(&priv->netif.rxq.outstanding)) {
+	if (atomic_dec_and_test(&priv->netif.rxq.outstanding))
 		/*
 		 * We reset the 'completed' count once we successfully drain
 		 * the queue
 		 */
 		priv->netif.rxq.completed = 0;
-		if (waitqueue_active(&priv->netif.rxq.wq))
-			wake_up(&priv->netif.rxq.wq);
-	} else
+	else
 		priv->netif.rxq.completed++;
+
+	if (waitqueue_active(&priv->netif.rxq.wq))
+		wake_up(&priv->netif.rxq.wq);
 
 	/*
 	 * If txmitigation is disabled, or if we hit the txmitigation threshold,
