@@ -986,7 +986,6 @@ static struct kvm *kvm_create_vm(void)
 	atomic_inc(&kvm->mm->mm_count);
 	spin_lock_init(&kvm->mmu_lock);
 	spin_lock_init(&kvm->requests_lock);
-	kvm_init_irq_routing(kvm);
 	kvm_io_bus_init(&kvm->pio_bus);
 	kvm_eventfd_init(kvm);
 	mutex_init(&kvm->lock);

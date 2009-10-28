@@ -182,10 +182,7 @@ struct kvm {
 
 	struct mutex irq_lock;
 #ifdef CONFIG_HAVE_KVM_IRQCHIP
-	struct {
-		struct srcu_struct            srcu;
-		struct kvm_irq_routing_table *table;
-	} irq_routing;
+	struct kvm_irq_routing_table *irq_routing;
 	struct hlist_head mask_notifier_list;
 	struct hlist_head irq_ack_notifier_list;
 #endif
@@ -563,7 +560,6 @@ int kvm_set_irq_routing(struct kvm *kvm,
 			const struct kvm_irq_routing_entry *entries,
 			unsigned nr,
 			unsigned flags);
-void kvm_init_irq_routing(struct kvm *kvm);
 void kvm_free_irq_routing(struct kvm *kvm);
 
 #else
