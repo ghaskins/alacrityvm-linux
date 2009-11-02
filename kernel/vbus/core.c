@@ -495,6 +495,10 @@ static void _vbus_release(struct kref *kref)
 {
 	struct vbus *vbus = container_of(kref, struct vbus, kref);
 
+	mutex_lock(&vbus_root.lock);
+	map_del(&vbus_root.buses.map, &vbus->node);
+	mutex_unlock(&vbus_root.lock);
+
 	kobject_put(&vbus->devices.kobj);
 	kobject_put(&vbus->members.kobj);
 	kobject_put(&vbus->kobj);
