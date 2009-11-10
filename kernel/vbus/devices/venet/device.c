@@ -776,6 +776,12 @@ venetdev_sg_import(struct venetdev *priv, void *ptr, int len)
 		return NULL;
 	}
 
+	if (vsg->phdr.mac != ~0U)
+		skb_set_mac_header(skb, vsg->phdr.mac);
+
+	skb_set_network_header(skb, vsg->phdr.network);
+	skb_set_transport_header(skb, vsg->phdr.transport);
+
 	if (vsg->flags & VENET_SG_FLAG_GSO) {
 		struct skb_shared_info *sinfo = skb_shinfo(skb);
 
@@ -2250,7 +2256,7 @@ host_mac_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 struct vbus_device_attribute attr_hmac =
 	__ATTR_RO(host_mac);
 
-static ssize_t
+ssize_t
 cmac_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	      const char *buf, size_t count)
 {
@@ -2282,7 +2288,7 @@ cmac_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	return count;
 }
 
-static ssize_t
+ssize_t
 client_mac_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	 char *buf)
 {

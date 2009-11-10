@@ -832,6 +832,14 @@ vbus_enet_tx_start(struct sk_buff *skb, struct net_device *dev)
 		vsg->cookie = (u64)(unsigned long)skb;
 		vsg->len    = skb->len;
 
+		vsg->phdr.transport = skb_transport_header(skb) - skb->head;
+		vsg->phdr.network   = skb_network_header(skb) - skb->head;
+
+		if (skb_mac_header_was_set(skb))
+			vsg->phdr.mac = skb_mac_header(skb) - skb->head;
+		else
+			vsg->phdr.mac = ~0U;
+
 		if (skb->ip_summed == CHECKSUM_PARTIAL) {
 			vsg->flags      |= VENET_SG_FLAG_NEEDS_CSUM;
 			vsg->csum.start  = skb->csum_start - skb_headroom(skb);

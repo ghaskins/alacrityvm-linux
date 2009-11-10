@@ -20,3 +20,14 @@ config VBUS_VENETTAP
 
 	If unsure, say N
 
+config VBUS_VENETMACV
+       tristate "Virtual-Bus Ethernet MACVLAN Device"
+       depends on VBUS_DEVICES && MACVLAN
+       select VBUS_VENETDEV
+       default n
+       help
+        Provides a vbus based virtual ethernet adapter with a macvlan
+        device as its backend.
+
+	If unsure, say N
+

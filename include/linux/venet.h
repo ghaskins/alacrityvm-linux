@@ -78,6 +78,11 @@ struct venet_sg {
 		__u16    hdrlen;
 		__u16    size;
 	} gso;
+	struct {
+		__u32    mac;         /* mac offset */
+		__u32    network;     /* network offset */
+		__u32    transport;   /* transport offset */
+	} phdr;
 	__u32            count;   /* nr of iovs */
 	struct venet_iov iov[1];
 };
