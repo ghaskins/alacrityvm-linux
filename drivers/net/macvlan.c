@@ -30,22 +30,7 @@
 #include <linux/if_macvlan.h>
 #include <net/rtnetlink.h>
 
-#define MACVLAN_HASH_SIZE	(1 << BITS_PER_BYTE)
-
-struct macvlan_port {
-	struct net_device	*dev;
-	struct hlist_head	vlan_hash[MACVLAN_HASH_SIZE];
-	struct list_head	vlans;
-};
-
-struct macvlan_dev {
-	struct net_device	*dev;
-	struct list_head	list;
-	struct hlist_node	hlist;
-	struct macvlan_port	*port;
-	struct net_device	*lowerdev;
-};
-
+#include <linux/macvlan.h>
 
 static struct macvlan_dev *macvlan_hash_lookup(const struct macvlan_port *port,
 					       const unsigned char *addr)
@@ -135,7 +120,7 @@ static void macvlan_broadcast(struct sk_buff *skb,
 			else
 				nskb->pkt_type = PACKET_MULTICAST;
 
-			netif_rx(nskb);
+			vlan->receive(nskb);
 		}
 	}
 }
@@ -180,11 +165,11 @@ static struct sk_buff *macvlan_handle_frame(struct sk_buff *skb)
 	skb->dev = dev;
 	skb->pkt_type = PACKET_HOST;
 
-	netif_rx(skb);
+	vlan->receive(skb);
 	return NULL;
 }
 
-static int macvlan_start_xmit(struct sk_buff *skb, struct net_device *dev)
+int macvlan_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	const struct macvlan_dev *vlan = netdev_priv(dev);
 	unsigned int len = skb->len;
@@ -202,6 +187,7 @@ static int macvlan_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 	return NETDEV_TX_OK;
 }
+EXPORT_SYMBOL_GPL(macvlan_start_xmit);
 
 static int macvlan_hard_header(struct sk_buff *skb, struct net_device *dev,
 			       unsigned short type, const void *daddr,
@@ -412,7 +398,7 @@ static const struct net_device_ops macvlan_netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
-static void macvlan_setup(struct net_device *dev)
+void macvlan_setup(struct net_device *dev)
 {
 	ether_setup(dev);
 
@@ -423,6 +409,7 @@ static void macvlan_setup(struct net_device *dev)
 	dev->ethtool_ops	= &macvlan_ethtool_ops;
 	dev->tx_queue_len	= 0;
 }
+EXPORT_SYMBOL_GPL(macvlan_setup);
 
 static int macvlan_port_create(struct net_device *dev)
 {
@@ -472,7 +459,7 @@ static void macvlan_transfer_operstate(struct net_device *dev)
 	}
 }
 
-static int macvlan_validate(struct nlattr *tb[], struct nlattr *data[])
+int macvlan_validate(struct nlattr *tb[], struct nlattr *data[])
 {
 	if (tb[IFLA_ADDRESS]) {
 		if (nla_len(tb[IFLA_ADDRESS]) != ETH_ALEN)
@@ -482,9 +469,10 @@ static int macvlan_validate(struct nlattr *tb[], struct nlattr *data[])
 	}
 	return 0;
 }
+EXPORT_SYMBOL_GPL(macvlan_validate);
 
-static int macvlan_newlink(struct net_device *dev,
-			   struct nlattr *tb[], struct nlattr *data[])
+int macvlan_newlink(struct net_device *dev,
+		    struct nlattr *tb[], struct nlattr *data[])
 {
 	struct macvlan_dev *vlan = netdev_priv(dev);
 	struct macvlan_port *port;
@@ -524,6 +512,7 @@ static int macvlan_newlink(struct net_device *dev,
 	vlan->lowerdev = lowerdev;
 	vlan->dev      = dev;
 	vlan->port     = port;
+	vlan->receive  = netif_rx;
 
 	err = register_netdevice(dev);
 	if (err < 0)
@@ -533,8 +522,9 @@ static int macvlan_newlink(struct net_device *dev,
 	macvlan_transfer_operstate(dev);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(macvlan_newlink);
 
-static void macvlan_dellink(struct net_device *dev)
+void macvlan_dellink(struct net_device *dev)
 {
 	struct macvlan_dev *vlan = netdev_priv(dev);
 	struct macvlan_port *port = vlan->port;
@@ -545,6 +535,7 @@ static void macvlan_dellink(struct net_device *dev)
 	if (list_empty(&port->vlans))
 		macvlan_port_destroy(port->dev);
 }
+EXPORT_SYMBOL_GPL(macvlan_dellink);
 
 static struct rtnl_link_ops macvlan_link_ops __read_mostly = {
 	.kind		= "macvlan",
