@@ -1235,7 +1235,6 @@ _eventq_assign_ioctl(struct vbus_kvm *vkvm,
 	if (ret < 0)
 		goto fail;
 
-	get_file(input);
 	fd_install(fd, input); /* cannot fail after installing the fd */
 
 	eventq->eventfd = output;
