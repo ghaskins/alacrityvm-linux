@@ -1297,19 +1297,19 @@ _fcc_assign_ioctl(struct vbus_kvm *vkvm,
 		return PTR_ERR(_shm);
 	}
 
+	_fcc->id   = args->vector;
 	_fcc->shm  = &_shm->shm;
 	_fcc->desc = (struct vbus_pci_fastcall_desc *)_fcc->shm->ptr;
 
 	mutex_lock(&vkvm->lock);
 
 	ret = radix_tree_insert(&vkvm->fastcalls.channels.radix,
-				args->vector, _fcc);
+				_fcc->id, _fcc);
 	if (ret < 0) {
 		vbus_shm_put(_fcc->shm);
 		kfree(_fcc);
-	}
-
-	list_add_tail(&_fcc->list, &vkvm->fastcalls.channels.list);
+	} else
+		list_add_tail(&_fcc->list, &vkvm->fastcalls.channels.list);
 
 	mutex_unlock(&vkvm->lock);
 
