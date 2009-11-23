@@ -25,6 +25,10 @@
 #include <linux/shm_signal.h>
 #include <linux/workqueue.h>
 
+MODULE_AUTHOR("Gregory Haskins");
+MODULE_LICENSE("GPL");
+MODULE_VERSION("1");
+
 int shm_signal_enable(struct shm_signal *s, int flags)
 {
 	struct shm_signal_irq *irq = &s->desc->irq[s->locale];
