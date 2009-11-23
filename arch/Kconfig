@@ -113,4 +113,7 @@ config HAVE_DMA_API_DEBUG
 config HAVE_DEFAULT_NO_SPIN_MUTEXES
 	bool
 
+config HAVE_CREATE_IRQ
+        bool
+
 source "kernel/gcov/Kconfig"
