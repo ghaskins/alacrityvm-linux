@@ -23,3 +23,15 @@ config VBUS_PCIBRIDGE
         Provides a way to bridge host side vbus devices via a PCI-BRIDGE
         object.  If you are running virtualization with vbus devices on the
 	host, and the vbus is exposed via PCI, say Y.  Otherwise, say N.
+
+config VBUS_IOQ_TEST
+	tristate "Virtual-Bus IO-Queue Test Driver"
+	depends on VBUS_PROXY
+	select IOQ
+	default n
+	help
+	  Simple usage example for the Virtual-Bus IOQ mechanism. Say N
+	  unless you are developing code for Virtual-Bus and IO-Queue.
+
+	  This driver is intended to be built as a module.
+
