@@ -743,6 +743,8 @@ config RAPIDIO
 
 source "drivers/rapidio/Kconfig"
 
+source "drivers/vbus/Kconfig"
+
 endmenu
 
 menu "Advanced setup"
@@ -951,3 +953,5 @@ config PPC_LIB_RHEAP
 	bool
 
 source "arch/powerpc/kvm/Kconfig"
+
+source "kernel/vbus/Kconfig"
