@@ -350,7 +350,11 @@ ll_ifname_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	if (priv->dev.vbus.opened)
 		return -EINVAL;
 
-	strncpy(priv->ll_ifname, buf, count-1);
+	memcpy(priv->ll_ifname, buf, count);
+
+	/* remove trailing newline if present */
+	if (priv->ll_ifname[count-1] == '\n')
+		priv->ll_ifname[count-1] = '\0';
 
 	if (priv->mdev.lowerdev) {
 		dev_put(priv->mdev.lowerdev);
