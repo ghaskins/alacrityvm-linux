@@ -2300,7 +2300,7 @@ client_mac_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 struct vbus_device_attribute attr_cmac =
 	__ATTR(client_mac, S_IRUGO | S_IWUSR, client_mac_show, cmac_store);
 
-static ssize_t
+ssize_t
 enabled_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	 char *buf)
 {
@@ -2309,7 +2309,7 @@ enabled_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	return snprintf(buf, PAGE_SIZE, "%d\n", priv->netif.enabled);
 }
 
-static ssize_t
+ssize_t
 enabled_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	      const char *buf, size_t count)
 {
@@ -2323,8 +2323,13 @@ enabled_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	if (enabled != 0 && enabled != 1)
 		return -EINVAL;
 
-	if (enabled && !priv->netif.enabled)
+	if (enabled && !priv->netif.enabled) {
+		/* need to un-initialize certain fields of the
+		   net_device so that it may be re-registered */
+		priv->netif.dev->reg_state = NETREG_UNINITIALIZED;
+		priv->netif.dev->dev.kobj.state_initialized = 0;
 		ret = register_netdev(priv->netif.dev);
+	}
 
 	if (!enabled && priv->netif.enabled)
 		venetdev_netdev_unregister(priv);

@@ -150,7 +150,7 @@ struct net_device_stats *venetdev_get_stats(struct venetdev *dev);
 static inline void venetdev_netdev_unregister(struct venetdev *priv)
 {
 	if (priv->netif.enabled) {
-		venetdev_netdev_stop(priv->netif.dev);
+		venetdev_stop(priv);
 		unregister_netdev(priv->netif.dev);
 	}
 }
@@ -173,6 +173,11 @@ extern struct vbus_device_attribute attr_ifname;
 extern struct vbus_device_attribute attr_txmitigation;
 extern struct vbus_device_attribute attr_zcthresh;
 
+ssize_t enabled_store(struct vbus_device *dev,
+		struct vbus_device_attribute *attr,
+		 const char *buf, size_t count);
+ssize_t enabled_show(struct vbus_device *dev,
+			struct vbus_device_attribute *attr, char *buf);
 ssize_t cmac_store(struct vbus_device *dev,
 		struct vbus_device_attribute *attr,
 		 const char *buf, size_t count);

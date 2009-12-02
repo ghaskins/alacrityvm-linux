@@ -137,7 +137,7 @@ venetmacv_vlink_up(struct venetdev *vdev)
 		ret = macv->macvlan_netdev_ops->ndo_open(vdev->netif.dev);
 		rtnl_unlock();
 		if (ret)
-			printk(KERN_ERR "macvlanopen failed %d!\n", ret);
+			printk(KERN_ERR "macvlan_open failed %d!\n", ret);
 	}
 }
 
@@ -320,8 +320,10 @@ venetmacv_device_release(struct vbus_device *dev)
 {
 	struct venetmacv *macv = vbusdev_to_macv(dev);
 
-	if (macv->mdev.lowerdev)
+	if (macv->mdev.lowerdev) {
 		dev_put(macv->mdev.lowerdev);
+		macv->mdev.lowerdev = NULL;
+	}
 
 	venetdev_netdev_unregister(&macv->dev);
 	free_netdev(macv->mdev.dev);
@@ -397,12 +399,31 @@ clientmac_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	return ret;
 }
 
-struct vbus_device_attribute attr_clientmac =
+static struct vbus_device_attribute attr_clientmac =
 	__ATTR(client_mac, S_IRUGO | S_IWUSR, client_mac_show, clientmac_store);
+
+
+static ssize_t
+macv_enabled_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
+		   const char *buf, size_t count)
+{
+	struct venetmacv *macv = vbusdev_to_macv(dev);
+	int ret;
+
+	if (!macv->mdev.lowerdev)
+		return -ENXIO;
+
+	ret = attr_enabled.store(dev, attr, buf, count);
+
+	return ret;
+}
+
+static struct vbus_device_attribute attr_macv_enabled =
+	__ATTR(enabled, S_IRUGO | S_IWUSR, enabled_show, macv_enabled_store);
 
 static struct attribute *attrs[] = {
 	&attr_clientmac.attr,
-	&attr_enabled.attr,
+	&attr_macv_enabled.attr,
 	&attr_burstthresh.attr,
 	&attr_txmitigation.attr,
 	&attr_ifname.attr,
@@ -423,9 +444,7 @@ venetmacv_netdev_open(struct net_device *dev)
 	venetdev_open(&priv->dev);
 
 	if (priv->dev.vbus.link) {
-		rtnl_lock();
 		ret = priv->macvlan_netdev_ops->ndo_open(priv->mdev.dev);
-		rtnl_unlock();
 	}
 
 	return ret;
@@ -443,13 +462,24 @@ venetmacv_netdev_stop(struct net_device *dev)
 
 	venetdev_stop(&priv->dev);
 
-	if (priv->dev.vbus.link && needs_stop) {
-		rtnl_lock();
+	if (priv->dev.vbus.link && needs_stop)
 		ret = priv->macvlan_netdev_ops->ndo_stop(dev);
-		rtnl_unlock();
-	}
 
 	return ret;
+}
+
+static void
+venetmacv_netdev_uninit(struct net_device *dev)
+{
+	struct venetmacv *macv = netdev_priv(dev);
+
+	if (macv->mdev.lowerdev) {
+		dev_put(macv->mdev.lowerdev);
+		macv->mdev.lowerdev = NULL;
+		memset(macv->ll_ifname, '\0', IFNAMSIZ);
+	}
+
+	macv->dev.netif.enabled = 0;
 }
 
 /*
@@ -527,8 +557,8 @@ static struct net_device_ops venetmacv_netdev_ops = {
 	.ndo_start_xmit         = venetmacv_netdev_tx,
 	.ndo_do_ioctl           = venetdev_netdev_ioctl,
 	.ndo_get_stats          = venetmacv_netdev_stats,
+	.ndo_uninit             = venetmacv_netdev_uninit,
 };
-
 
 /*
  * This is called whenever the admin instantiates our devclass via
@@ -544,6 +574,9 @@ venetmacv_device_create(struct vbus_devclass *dc,
 
 	dev = alloc_netdev(sizeof(struct venetmacv), "macvenet%d",
 					   macvlan_setup);
+
+
+	dev->destructor = NULL;
 
 	if (!dev)
 		return -ENOMEM;
