@@ -42,7 +42,7 @@ struct _connection {
 	struct rb_node node;
 	struct list_head signals;
 	struct vbus_connection *conn;
-	int closed:1;
+	bool closed;
 };
 
 static inline void _signal_get(struct _signal *_signal)

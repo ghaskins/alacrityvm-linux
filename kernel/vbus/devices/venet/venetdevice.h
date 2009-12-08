@@ -65,8 +65,8 @@ struct venetdev {
 			size_t               completed;
 			wait_queue_head_t    wq;
 		} rxq;
-		int                          enabled:1;
-		int                          link:1;
+		bool                         enabled;
+		bool                         link;
 	} netif;
 
 	struct {
@@ -85,29 +85,29 @@ struct venetdev {
 		struct {
 			char                 buf[MAX_VSG_DESC_SIZE];
 			size_t               len;
-			int                  enabled:1;
+			bool                 enabled;
 		} sg;
 		struct {
 			struct vbus_shm     *shm;
-			int                  enabled:1;
+			bool                 enabled;
 		} pmtd;
 		struct {
 			spinlock_t             lock;
 			struct vbus_shm       *shm;
 			struct venetdev_queue  queue;
-			int                    enabled:1;
-			int                    linkstate:1;
-			int                    txc:1;
+			bool                   enabled;
+			bool                   linkstate;
+			bool                   txc;
 		} evq;
 		struct {
 			struct vbus_shm       *shm;
 			struct venetdev_queue  pageq;
-			int                    available:1;
-			int                    enabled:1;
+			bool                   available;
+			bool                   enabled;
 		} l4ro;
-		int                          connected:1;
-		int                          opened:1;
-		int                          link:1;
+		bool                         connected;
+		bool                         opened;
+		bool                         link;
 	} vbus;
 
 	struct {
