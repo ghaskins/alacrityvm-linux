@@ -113,7 +113,7 @@ struct _client {
 	struct srcu_struct srcu;
 };
 
-struct _connection *to_conn(struct rb_node *node)
+static struct _connection *to_conn(struct rb_node *node)
 {
 	return node ? container_of(node, struct _connection, node) : NULL;
 }
@@ -370,7 +370,7 @@ _release(struct vbus_client *client)
 	kfree(c);
 }
 
-struct vbus_client_ops _client_ops = {
+static struct vbus_client_ops _client_ops = {
 	.deviceopen  = _deviceopen,
 	.deviceclose = _deviceclose,
 	.devicecall  = _devicecall,
@@ -412,14 +412,14 @@ static unsigned long
 current_memctx_copy_to(struct vbus_memctx *ctx, void *dst, const void *src,
 		       unsigned long len)
 {
-	return copy_to_user(dst, src, len);
+	return copy_to_user((void __user __force *)dst, src, len);
 }
 
 static unsigned long
 current_memctx_copy_from(struct vbus_memctx *ctx, void *dst, const void *src,
 			 unsigned long len)
 {
-	return copy_from_user(dst, src, len);
+	return copy_from_user(dst, (void __user __force *)src, len);
 }
 
 static void
