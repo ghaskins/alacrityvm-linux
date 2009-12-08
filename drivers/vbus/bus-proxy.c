@@ -115,7 +115,7 @@ static ssize_t _show_modalias(struct device *dev,
 {
 	return sprintf(buf, "vbus-proxy:%s\n", to_dev(dev)->type);
 }
-DEVICE_ATTR(modalias, S_IRUSR | S_IRGRP | S_IROTH, _show_modalias, NULL);
+static DEVICE_ATTR(modalias, S_IRUSR | S_IRGRP | S_IROTH, _show_modalias, NULL);
 
 int vbus_device_proxy_register(struct vbus_device_proxy *new)
 {
