@@ -369,7 +369,7 @@ evq_send_event(struct venetdev *priv, struct venet_event_header *header,
 	/* FIXME */
 	BUG_ON(!iter.desc->sown);
 
-	offset = (size_t)iter.desc->ptr;
+	offset = (size_t)le64_to_cpu(iter.desc->ptr);
 	ptr = priv->vbus.evq.shm->ptr + offset;
 
 	if ((offset + header->size) > priv->vbus.evq.shm->len) {

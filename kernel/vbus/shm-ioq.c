@@ -65,7 +65,7 @@ int vbus_shm_ioq_attach(struct vbus_shm *shm, struct shm_signal *signal,
 	if (head->ver != IOQ_RING_VER)
 		return -EINVAL;
 
-	ringcount = head->count;
+	ringcount = le32_to_cpu(head->count);
 
 	if ((maxcount != -1) && (ringcount > maxcount))
 		return -EINVAL;
