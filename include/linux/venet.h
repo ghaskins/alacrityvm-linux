@@ -37,9 +37,10 @@ struct venet_capabilities {
 	__u32 bits;
 };
 
-#define VENET_CAP_GROUP_SG     0
+/* DEPRECATED: 0, 2 */
 #define VENET_CAP_GROUP_EVENTQ 1
-#define VENET_CAP_GROUP_L4RO    2 /* layer-4 reassem offloading */
+#define VENET_CAP_GROUP_SG     3
+#define VENET_CAP_GROUP_L4RO   4 /* layer-4 reassem offloading */
 
 /* CAPABILITIES-GROUP SG */
 #define VENET_CAP_SG     (1 << 0)
@@ -83,6 +84,7 @@ struct venet_sg {
 		__u32    network;     /* network offset */
 		__u32    transport;   /* transport offset */
 	} phdr;
+	__u32            pad[32]; /* pad area for future use */
 	__u32            count;   /* nr of iovs */
 	struct venet_iov iov[1];
 };
