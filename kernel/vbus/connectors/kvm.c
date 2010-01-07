@@ -1395,10 +1395,16 @@ vbus_kvm_chardev_release(struct inode *inode, struct file *filp)
 		kvm_xioevent_deassign(vkvm->fastcalls.ioevent);
 	if (vkvm->shmsignals)
 		kvm_xioevent_deassign(vkvm->shmsignals);
-	mmput(vkvm->mm);
+
+	if (vkvm->state == _state_ready)
+		vbus_notifier_unregister(vkvm->vbus, &vkvm->vbusnotify);
+
+	if (vkvm->mm)
+		mmput(vkvm->mm);
+
 	vbus_memctx_put(vkvm->ctx);
 	vbus_client_put(vkvm->client);
-	vbus_notifier_unregister(vkvm->vbus, &vkvm->vbusnotify);
+
 	vbus_put(vkvm->vbus);
 
 	vbus_kvm_put(vkvm);
