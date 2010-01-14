@@ -570,7 +570,7 @@ static int macvlan_device_event(struct notifier_block *unused,
 		break;
 	case NETDEV_UNREGISTER:
 		list_for_each_entry_safe(vlan, next, &port->vlans, list)
-			macvlan_dellink(vlan->dev);
+			vlan->dev->rtnl_link_ops->dellink(vlan->dev);
 		break;
 	}
 	return NOTIFY_DONE;
