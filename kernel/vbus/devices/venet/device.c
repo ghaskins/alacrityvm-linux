@@ -1999,7 +1999,7 @@ venetdev_flushrx(struct venetdev *priv)
 	return 0;
 }
 
-void venetdev_init(struct venetdev *device, struct net_device *dev)
+void venetdev_common_init(struct venetdev *device)
 {
 	device->vbus.import      = &venetdev_flat_import;
 	device->vbus.export      = &venetdev_flat_export;
@@ -2018,8 +2018,12 @@ void venetdev_init(struct venetdev *device, struct net_device *dev)
 	device->netif.rxq.completed = 0;
 	init_waitqueue_head(&device->netif.rxq.wq);
 
-	device->netif.dev = dev;
 	device->netif.out = venetdev_out;
+}
+
+void venetdev_dev_init(struct venetdev *device, struct net_device *dev)
+{
+	device->netif.dev = dev;
 
 	ether_setup(dev); /* assign some of the fields */
 

@@ -24,12 +24,6 @@ struct macvlan_dev {
 };
 
 extern int macvlan_start_xmit(struct sk_buff *skb, struct net_device *dev);
-extern int macvlan_link_lowerdev(struct net_device *dev,
-						  struct net_device *lowerdev);
-
-extern void macvlan_unlink_lowerdev(struct net_device *dev);
-
-extern void macvlan_transfer_operstate(struct net_device *dev);
 
 extern void macvlan_setup(struct net_device *dev);
 

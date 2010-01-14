@@ -163,7 +163,8 @@ int venetdev_vlink_shm(struct vbus_connection *conn,
 		   struct shm_signal *signal, unsigned long flags);
 void  venetdev_vlink_release(struct vbus_connection *conn);
 void  venetdev_vlink_close(struct vbus_connection *conn);
-void venetdev_init(struct venetdev *vdev, struct net_device *dev);
+void venetdev_common_init(struct venetdev *vdev);
+void venetdev_dev_init(struct venetdev *vdev, struct net_device *dev);
 
 extern struct vbus_device_attribute attr_cmac;
 extern struct vbus_device_attribute attr_hmac;
