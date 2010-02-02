@@ -1017,7 +1017,7 @@ vbus_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 */
 	ret = vbus_pci_eventq_register();
 	if (ret < 0) {
-		printk(KERN_ERR "VBUS_PCI: Could not register with host: %d\n",
+		printk(KERN_ERR "VBUS_PCI: Could not register eventq with host: %d\n",
 		       ret);
 		goto out_fail;
 	}
