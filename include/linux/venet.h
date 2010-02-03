@@ -55,8 +55,8 @@ struct venet_capabilities {
 #define VENET_CAP_EVQ_TXC        (1 << 1) /* tx-complete */
 
 struct venet_iov {
-	__u32 len;
-	__u64 ptr;
+	__u32       len;
+	aligned_u64 ptr;
 };
 
 #define VENET_SG_FLAG_NEEDS_CSUM (1 << 0)
@@ -64,7 +64,7 @@ struct venet_iov {
 #define VENET_SG_FLAG_ECN        (1 << 2)
 
 struct venet_sg {
-	__u64            cookie;
+	aligned_u64      cookie;
 	__u32            flags;
 	__u32            len;     /* total length of all iovs */
 	struct {
@@ -114,7 +114,7 @@ struct venet_event_linkstate {
 struct venet_event_txc {
 	struct venet_event_header header;
 	__u32                     txqid;
-	__u64                     cookie;
+	aligned_u64               cookie;
 };
 
 struct venet_l4ro_query {

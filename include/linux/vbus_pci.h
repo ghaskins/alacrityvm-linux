@@ -52,40 +52,40 @@ enum {
 struct vbus_pci_bridge_negotiate {
 	__u32 magic;
 	__u32 version;
-	__u64 capabilities;
+	aligned_u64 capabilities;
 };
 
 struct vbus_pci_deviceopen {
 	__u32 devid;
 	__u32 version; /* device ABI version */
-	__u64 handle; /* return value for devh */
+	aligned_u64 handle; /* return value for devh */
 };
 
 struct vbus_pci_devicecall {
-	__u64 devh;   /* device-handle (returned from DEVICEOPEN */
+	aligned_u64 devh;   /* device-handle (returned from DEVICEOPEN */
 	__u32 func;
 	__u32 len;
 	__u32 flags;
-	__u64 datap;
+	aligned_u64 datap;
 };
 
 struct vbus_pci_deviceshm {
-	__u64 devh;   /* device-handle (returned from DEVICEOPEN */
+	aligned_u64 devh;   /* device-handle (returned from DEVICEOPEN */
 	__u32 id;
 	__u32 len;
 	__u32 flags;
 	struct {
 		__u32 offset;
 		__u32 prio;
-		__u64 cookie; /* token to pass back when signaling client */
+		aligned_u64 cookie; /* token to pass back when signaling client */
 	} signal;
-	__u64 datap;
+	aligned_u64 datap;
 };
 
 struct vbus_pci_call_desc {
 	__u32 vector;
 	__u32 len;
-	__u64 datap;
+	aligned_u64 datap;
 };
 
 struct vbus_pci_fastcall_desc {
@@ -107,8 +107,8 @@ struct vbus_pci_signals {
 
 struct vbus_pci_eventqreg {
 	__u32 count;
-	__u64 ring;
-	__u64 data;
+	aligned_u64 ring;
+	aligned_u64 data;
 };
 
 struct vbus_pci_busreg {
@@ -126,12 +126,12 @@ enum vbus_pci_eventid {
 #define VBUS_MAX_DEVTYPE_LEN 128
 
 struct vbus_pci_add_event {
-	__u64 id;
+	aligned_u64 id;
 	char  type[VBUS_MAX_DEVTYPE_LEN];
 };
 
 struct vbus_pci_handle_event {
-	__u64 handle;
+	aligned_u64 handle;
 };
 
 struct vbus_pci_event {

@@ -51,9 +51,9 @@
  *-----------
  */
 struct ioq_ring_desc {
-	__u64                 cookie; /* for arbitrary use by north-side */
-	__le64                ptr;
-	__le64                len;
+	aligned_u64           cookie; /* for arbitrary use by north-side */
+	aligned_le64          ptr;
+	aligned_le64          len;
 	__u8                  valid;
 	__u8                  sown; /* South owned = 1, North owned = 0 */
 };
