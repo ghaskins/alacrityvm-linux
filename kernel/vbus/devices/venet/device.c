@@ -401,7 +401,8 @@ evq_send_linkstatus(struct venetdev *priv, bool status)
 		.state = status ? 1 : 0,
 	};
 
-	evq_send_event(priv, &event.header, true);
+	if (priv->vbus.evq.linkstate)
+		evq_send_event(priv, &event.header, true);
 }
 
 static void
