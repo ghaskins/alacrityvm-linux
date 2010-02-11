@@ -49,6 +49,8 @@ static DEFINE_PER_CPU(struct thermal_state, thermal_state);
 
 static atomic_t therm_throt_en	= ATOMIC_INIT(0);
 
+static u32 lvtthmr_init __read_mostly;
+
 #ifdef CONFIG_SYSFS
 #define define_therm_throt_sysdev_one_ro(_name)				\
 	static SYSDEV_ATTR(_name, 0444, therm_throt_sysdev_show_##_name, NULL)
@@ -254,14 +256,27 @@ asmlinkage void smp_thermal_interrupt(struct pt_regs *regs)
 	ack_APIC_irq();
 }
 
+void __init mcheck_intel_therm_init(void)
+{
+	/*
+	 * This function is only called on boot CPU. Save the init thermal
+	 * LVT value on BSP and use that value to restore APs' thermal LVT
+	 * entry BIOS programmed later
+	 */
+	if (cpu_has(&boot_cpu_data, X86_FEATURE_ACPI) &&
+		cpu_has(&boot_cpu_data, X86_FEATURE_ACC))
+		lvtthmr_init = apic_read(APIC_LVTTHMR);
+}
+
 void intel_init_thermal(struct cpuinfo_x86 *c)
 {
 	unsigned int cpu = smp_processor_id();
 	int tm2 = 0;
 	u32 l, h;
 
-	/* Thermal monitoring depends on ACPI and clock modulation*/
-	if (!cpu_has(c, X86_FEATURE_ACPI) || !cpu_has(c, X86_FEATURE_ACC))
+	/* Thermal monitoring depends on APIC, ACPI and clock modulation */
+	if (!cpu_has_apic || !cpu_has(c, X86_FEATURE_ACPI) ||
+		!cpu_has(c, X86_FEATURE_ACC))
 		return;
 
 	/*
@@ -270,15 +285,25 @@ void intel_init_thermal(struct cpuinfo_x86 *c)
 	 * since it might be delivered via SMI already:
 	 */
 	rdmsr(MSR_IA32_MISC_ENABLE, l, h);
-	h = apic_read(APIC_LVTTHMR);
+
+	/*
+	 * The initial value of thermal LVT entries on all APs always reads
+	 * 0x10000 because APs are woken up by BSP issuing INIT-SIPI-SIPI
+	 * sequence to them and LVT registers are reset to 0s except for
+	 * the mask bits which are set to 1s when APs receive INIT IPI.
+	 * Always restore the value that BIOS has programmed on AP based on
+	 * BSP's info we saved since BIOS is always setting the same value
+	 * for all threads/cores
+	 */
+	apic_write(APIC_LVTTHMR, lvtthmr_init);
+
+	h = lvtthmr_init;
+
 	if ((l & MSR_IA32_MISC_ENABLE_TM1) && (h & APIC_DM_SMI)) {
 		printk(KERN_DEBUG
 		       "CPU%d: Thermal monitoring handled by SMI\n", cpu);
 		return;
 	}
-
-	if (cpu_has(c, X86_FEATURE_TM2) && (l & MSR_IA32_MISC_ENABLE_TM2))
-		tm2 = 1;
 
 	/* Check whether a vector already exists */
 	if (h & APIC_VECTOR_MASK) {
@@ -286,6 +311,16 @@ void intel_init_thermal(struct cpuinfo_x86 *c)
 		       "CPU%d: Thermal LVT vector (%#x) already installed\n",
 		       cpu, (h & APIC_VECTOR_MASK));
 		return;
+	}
+
+	/* early Pentium M models use different method for enabling TM2 */
+	if (cpu_has(c, X86_FEATURE_TM2)) {
+		if (c->x86 == 6 && (c->x86_model == 9 || c->x86_model == 13)) {
+			rdmsr(MSR_THERM2_CTL, l, h);
+			if (l & MSR_THERM2_CTL_TM_SELECT)
+				tm2 = 1;
+		} else if (l & MSR_IA32_MISC_ENABLE_TM2)
+			tm2 = 1;
 	}
 
 	/* We'll mask the thermal vector in the lapic till we're ready: */

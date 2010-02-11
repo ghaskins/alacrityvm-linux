@@ -1082,7 +1082,8 @@ intel_tv_mode_valid(struct drm_connector *connector, struct drm_display_mode *mo
 	const struct tv_mode *tv_mode = intel_tv_mode_find(intel_output);
 
 	/* Ensure TV refresh is close to desired refresh */
-	if (tv_mode && abs(tv_mode->refresh - drm_mode_vrefresh(mode)) < 10)
+	if (tv_mode && abs(tv_mode->refresh - drm_mode_vrefresh(mode) * 1000)
+				< 1000)
 		return MODE_OK;
 	return MODE_CLOCK_RANGE;
 }
@@ -1212,20 +1213,17 @@ intel_tv_mode_set(struct drm_encoder *encoder, struct drm_display_mode *mode,
 		tv_ctl |= TV_TRILEVEL_SYNC;
 	if (tv_mode->pal_burst)
 		tv_ctl |= TV_PAL_BURST;
-	scctl1 = 0;
-	/* dda1 implies valid video levels */
-	if (tv_mode->dda1_inc) {
-		scctl1 |= TV_SC_DDA1_EN;
-	}
 
+	scctl1 = 0;
+	if (tv_mode->dda1_inc)
+		scctl1 |= TV_SC_DDA1_EN;
 	if (tv_mode->dda2_inc)
 		scctl1 |= TV_SC_DDA2_EN;
-
 	if (tv_mode->dda3_inc)
 		scctl1 |= TV_SC_DDA3_EN;
-
 	scctl1 |= tv_mode->sc_reset;
-	scctl1 |= video_levels->burst << TV_BURST_LEVEL_SHIFT;
+	if (video_levels)
+		scctl1 |= video_levels->burst << TV_BURST_LEVEL_SHIFT;
 	scctl1 |= tv_mode->dda1_inc << TV_SCDDA1_INC_SHIFT;
 
 	scctl2 = tv_mode->dda2_size << TV_SCDDA2_SIZE_SHIFT |
@@ -1437,6 +1435,35 @@ intel_tv_detect_type (struct drm_crtc *crtc, struct intel_output *intel_output)
 	return type;
 }
 
+/*
+ * Here we set accurate tv format according to connector type
+ * i.e Component TV should not be assigned by NTSC or PAL
+ */
+static void intel_tv_find_better_format(struct drm_connector *connector)
+{
+	struct intel_output *intel_output = to_intel_output(connector);
+	struct intel_tv_priv *tv_priv = intel_output->dev_priv;
+	const struct tv_mode *tv_mode = intel_tv_mode_find(intel_output);
+	int i;
+
+	if ((tv_priv->type == DRM_MODE_CONNECTOR_Component) ==
+		tv_mode->component_only)
+		return;
+
+
+	for (i = 0; i < sizeof(tv_modes) / sizeof(*tv_modes); i++) {
+		tv_mode = tv_modes + i;
+
+		if ((tv_priv->type == DRM_MODE_CONNECTOR_Component) ==
+			tv_mode->component_only)
+			break;
+	}
+
+	tv_priv->tv_format = tv_mode->name;
+	drm_connector_property_set_value(connector,
+		connector->dev->mode_config.tv_mode_property, i);
+}
+
 /**
  * Detect the TV connection.
  *
@@ -1473,6 +1500,7 @@ intel_tv_detect(struct drm_connector *connector)
 	if (type < 0)
 		return connector_status_disconnected;
 
+	intel_tv_find_better_format(connector);
 	return connector_status_connected;
 }
 
@@ -1773,6 +1801,8 @@ intel_tv_init(struct drm_device *dev)
 	drm_connector_attach_property(connector,
 				   dev->mode_config.tv_bottom_margin_property,
 				   tv_priv->margin[TV_MARGIN_BOTTOM]);
+
+	dev_priv->hotplug_supported_mask |= TV_HOTPLUG_INT_STATUS;
 out:
 	drm_sysfs_connector_add(connector);
 }

@@ -231,7 +231,7 @@ int pit_has_pending_timer(struct kvm_vcpu *vcpu)
 {
 	struct kvm_pit *pit = vcpu->kvm->arch.vpit;
 
-	if (pit && vcpu->vcpu_id == 0 && pit->pit_state.irq_ack)
+	if (pit && kvm_vcpu_is_bsp(vcpu) && pit->pit_state.irq_ack)
 		return atomic_read(&pit->pit_state.pit_timer.pending);
 	return 0;
 }
@@ -252,7 +252,7 @@ void __kvm_migrate_pit_timer(struct kvm_vcpu *vcpu)
 	struct kvm_pit *pit = vcpu->kvm->arch.vpit;
 	struct hrtimer *timer;
 
-	if (vcpu->vcpu_id != 0 || !pit)
+	if (!kvm_vcpu_is_bsp(vcpu) || !pit)
 		return;
 
 	timer = &pit->pit_state.pit_timer.timer;
@@ -294,7 +294,7 @@ static void create_pit_timer(struct kvm_kpit_state *ps, u32 val, int is_period)
 	pt->timer.function = kvm_timer_fn;
 	pt->t_ops = &kpit_ops;
 	pt->kvm = ps->pit->kvm;
-	pt->vcpu_id = 0;
+	pt->vcpu = pt->kvm->bsp_vcpu;
 
 	atomic_set(&pt->pending, 0);
 	ps->irq_ack = 1;
@@ -332,22 +332,33 @@ static void pit_load_count(struct kvm *kvm, int channel, u32 val)
 	case 1:
         /* FIXME: enhance mode 4 precision */
 	case 4:
-		create_pit_timer(ps, val, 0);
+		if (!(ps->flags & KVM_PIT_FLAGS_HPET_LEGACY)) {
+			create_pit_timer(ps, val, 0);
+		}
 		break;
 	case 2:
 	case 3:
-		create_pit_timer(ps, val, 1);
+		if (!(ps->flags & KVM_PIT_FLAGS_HPET_LEGACY)){
+			create_pit_timer(ps, val, 1);
+		}
 		break;
 	default:
 		destroy_pit_timer(&ps->pit_timer);
 	}
 }
 
-void kvm_pit_load_count(struct kvm *kvm, int channel, u32 val)
+void kvm_pit_load_count(struct kvm *kvm, int channel, u32 val, int hpet_legacy_start)
 {
-	mutex_lock(&kvm->arch.vpit->pit_state.lock);
-	pit_load_count(kvm, channel, val);
-	mutex_unlock(&kvm->arch.vpit->pit_state.lock);
+	u8 saved_mode;
+	if (hpet_legacy_start) {
+		/* save existing mode for later reenablement */
+		saved_mode = kvm->arch.vpit->pit_state.channels[0].mode;
+		kvm->arch.vpit->pit_state.channels[0].mode = 0xff; /* disable timer */
+		pit_load_count(kvm, channel, val);
+		kvm->arch.vpit->pit_state.channels[0].mode = saved_mode;
+	} else {
+		pit_load_count(kvm, channel, val);
+	}
 }
 
 static inline struct kvm_pit *dev_to_pit(struct kvm_io_device *dev)
@@ -556,6 +567,7 @@ void kvm_pit_reset(struct kvm_pit *pit)
 	struct kvm_kpit_channel_state *c;
 
 	mutex_lock(&pit->pit_state.lock);
+	pit->pit_state.flags = 0;
 	for (i = 0; i < 3; i++) {
 		c = &pit->pit_state.channels[i];
 		c->mode = 0xff;
@@ -589,7 +601,7 @@ static const struct kvm_io_device_ops speaker_dev_ops = {
 };
 
 /* Caller must have writers lock on slots_lock */
-struct kvm_pit *kvm_create_pit(struct kvm *kvm)
+struct kvm_pit *kvm_create_pit(struct kvm *kvm, u32 flags)
 {
 	struct kvm_pit *pit;
 	struct kvm_kpit_state *pit_state;
@@ -632,11 +644,13 @@ struct kvm_pit *kvm_create_pit(struct kvm *kvm)
 	if (ret < 0)
 		goto fail;
 
-	kvm_iodevice_init(&pit->speaker_dev, &speaker_dev_ops);
-	ret = __kvm_io_bus_register_dev(&kvm->pio_bus,
+	if (flags & KVM_PIT_SPEAKER_DUMMY) {
+		kvm_iodevice_init(&pit->speaker_dev, &speaker_dev_ops);
+		ret = __kvm_io_bus_register_dev(&kvm->pio_bus,
 						&pit->speaker_dev);
-	if (ret < 0)
-		goto fail_unregister;
+		if (ret < 0)
+			goto fail_unregister;
+	}
 
 	return pit;
 
@@ -658,6 +672,8 @@ void kvm_free_pit(struct kvm *kvm)
 	if (kvm->arch.vpit) {
 		kvm_unregister_irq_mask_notifier(kvm, 0,
 					       &kvm->arch.vpit->mask_notifier);
+		kvm_unregister_irq_ack_notifier(kvm,
+				&kvm->arch.vpit->pit_state.irq_ack_notifier);
 		mutex_lock(&kvm->arch.vpit->pit_state.lock);
 		timer = &kvm->arch.vpit->pit_state.pit_timer.timer;
 		hrtimer_cancel(timer);
@@ -685,11 +701,8 @@ static void __inject_pit_timer_intr(struct kvm *kvm)
 	 * VCPU0, and only if its LVT0 is in EXTINT mode.
 	 */
 	if (kvm->arch.vapics_in_nmi_mode > 0)
-		for (i = 0; i < KVM_MAX_VCPUS; ++i) {
-			vcpu = kvm->vcpus[i];
-			if (vcpu)
-				kvm_apic_nmi_wd_deliver(vcpu);
-		}
+		kvm_for_each_vcpu(i, vcpu, kvm)
+			kvm_apic_nmi_wd_deliver(vcpu);
 }
 
 void kvm_inject_pit_timer_irqs(struct kvm_vcpu *vcpu)
@@ -698,7 +711,7 @@ void kvm_inject_pit_timer_irqs(struct kvm_vcpu *vcpu)
 	struct kvm *kvm = vcpu->kvm;
 	struct kvm_kpit_state *ps;
 
-	if (vcpu && pit) {
+	if (pit) {
 		int inject = 0;
 		ps = &pit->pit_state;
 

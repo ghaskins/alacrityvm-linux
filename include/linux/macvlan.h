@@ -23,7 +23,7 @@ struct macvlan_dev {
 	int (*receive)(struct sk_buff *skb);
 };
 
-extern int macvlan_start_xmit(struct sk_buff *skb, struct net_device *dev);
+extern netdev_tx_t macvlan_start_xmit(struct sk_buff *skb, struct net_device *dev);
 
 extern void macvlan_setup(struct net_device *dev);
 

@@ -27,6 +27,7 @@ AS             := $(AS) -32
 LDFLAGS        := -m elf32_sparc
 CHECKFLAGS     += -D__sparc__
 export BITS    := 32
+UTS_MACHINE    := sparc
 
 #KBUILD_CFLAGS += -g -pipe -fcall-used-g5 -fcall-used-g7
 KBUILD_CFLAGS += -m32 -pipe -mno-fpu -fcall-used-g5 -fcall-used-g7
@@ -37,10 +38,6 @@ KBUILD_AFLAGS += -m32
 #  Actual linking is done with "make image".
 LDFLAGS_vmlinux = -r
 
-# Default target
-all: zImage
-
-
 else
 #####
 # sparc64
@@ -50,6 +47,7 @@ CHECKFLAGS      += -D__sparc__ -D__sparc_v9__ -D__arch64__ -m64
 
 LDFLAGS              := -m elf64_sparc
 export BITS          := 64
+UTS_MACHINE          := sparc64
 
 KBUILD_CFLAGS += -m64 -pipe -mno-fpu -mcpu=ultrasparc -mcmodel=medlow   \
                  -ffixed-g4 -ffixed-g5 -fcall-used-g7 -Wno-sign-compare \
@@ -87,6 +85,9 @@ endif
 
 boot := arch/sparc/boot
 
+# Default target
+all: zImage
+
 image zImage tftpboot.img vmlinux.aout: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
@@ -105,8 +106,9 @@ define archhelp
 endef
 else
 define archhelp
-  echo  '* vmlinux       - Standard sparc64 kernel'
-  echo  '  vmlinux.aout  - a.out kernel for sparc64'
+  echo  '* vmlinux      - standard sparc64 kernel'
+  echo  '* zImage       - stripped and compressed sparc64 kernel ($(boot)/zImage)'
+  echo  '  vmlinux.aout - a.out kernel for sparc64'
   echo  '  tftpboot.img - image prepared for tftp'
 endef
 endif

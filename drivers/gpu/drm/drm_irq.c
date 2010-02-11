@@ -37,6 +37,7 @@
 
 #include <linux/interrupt.h>	/* For task queue support */
 
+#include <linux/vgaarb.h>
 /**
  * Get interrupt from bus id.
  *
@@ -171,6 +172,26 @@ err:
 }
 EXPORT_SYMBOL(drm_vblank_init);
 
+static void drm_irq_vgaarb_nokms(void *cookie, bool state)
+{
+	struct drm_device *dev = cookie;
+
+	if (dev->driver->vgaarb_irq) {
+		dev->driver->vgaarb_irq(dev, state);
+		return;
+	}
+
+	if (!dev->irq_enabled)
+		return;
+
+	if (state)
+		dev->driver->irq_uninstall(dev);
+	else {
+		dev->driver->irq_preinstall(dev);
+		dev->driver->irq_postinstall(dev);
+	}
+}
+
 /**
  * Install IRQ handler.
  *
@@ -231,6 +252,9 @@ int drm_irq_install(struct drm_device *dev)
 		return ret;
 	}
 
+	if (!drm_core_check_feature(dev, DRIVER_MODESET))
+		vga_client_register(dev->pdev, (void *)dev, drm_irq_vgaarb_nokms, NULL);
+
 	/* After installing handler */
 	ret = dev->driver->irq_postinstall(dev);
 	if (ret < 0) {
@@ -278,6 +302,9 @@ int drm_irq_uninstall(struct drm_device * dev)
 		return -EINVAL;
 
 	DRM_DEBUG("irq=%d\n", dev->pdev->irq);
+
+	if (!drm_core_check_feature(dev, DRIVER_MODESET))
+		vga_client_register(dev->pdev, NULL, NULL, NULL);
 
 	dev->driver->irq_uninstall(dev);
 
@@ -402,15 +429,21 @@ int drm_vblank_get(struct drm_device *dev, int crtc)
 
 	spin_lock_irqsave(&dev->vbl_lock, irqflags);
 	/* Going from 0->1 means we have to enable interrupts again */
-	if (atomic_add_return(1, &dev->vblank_refcount[crtc]) == 1 &&
-	    !dev->vblank_enabled[crtc]) {
-		ret = dev->driver->enable_vblank(dev, crtc);
-		DRM_DEBUG("enabling vblank on crtc %d, ret: %d\n", crtc, ret);
-		if (ret)
+	if (atomic_add_return(1, &dev->vblank_refcount[crtc]) == 1) {
+		if (!dev->vblank_enabled[crtc]) {
+			ret = dev->driver->enable_vblank(dev, crtc);
+			DRM_DEBUG("enabling vblank on crtc %d, ret: %d\n", crtc, ret);
+			if (ret)
+				atomic_dec(&dev->vblank_refcount[crtc]);
+			else {
+				dev->vblank_enabled[crtc] = 1;
+				drm_update_vblank_count(dev, crtc);
+			}
+		}
+	} else {
+		if (!dev->vblank_enabled[crtc]) {
 			atomic_dec(&dev->vblank_refcount[crtc]);
-		else {
-			dev->vblank_enabled[crtc] = 1;
-			drm_update_vblank_count(dev, crtc);
+			ret = -EINVAL;
 		}
 	}
 	spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
@@ -436,6 +469,18 @@ void drm_vblank_put(struct drm_device *dev, int crtc)
 		mod_timer(&dev->vblank_disable_timer, jiffies + 5*DRM_HZ);
 }
 EXPORT_SYMBOL(drm_vblank_put);
+
+void drm_vblank_off(struct drm_device *dev, int crtc)
+{
+	unsigned long irqflags;
+
+	spin_lock_irqsave(&dev->vbl_lock, irqflags);
+	DRM_WAKEUP(&dev->vbl_queue[crtc]);
+	dev->vblank_enabled[crtc] = 0;
+	dev->last_vblank[crtc] = dev->driver->get_vblank_counter(dev, crtc);
+	spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
+}
+EXPORT_SYMBOL(drm_vblank_off);
 
 /**
  * drm_vblank_pre_modeset - account for vblanks across mode sets

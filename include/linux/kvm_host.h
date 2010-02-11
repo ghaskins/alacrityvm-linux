@@ -15,7 +15,6 @@
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/preempt.h>
-#include <linux/marker.h>
 #include <linux/msi.h>
 #include <asm/signal.h>
 
@@ -112,7 +111,7 @@ struct kvm_memory_slot {
 	struct {
 		unsigned long rmap_pde;
 		int write_count;
-	} *lpage_info;
+	} *lpage_info[KVM_NR_PAGE_SIZES - 1];
 	unsigned long userspace_addr;
 	int user_alloc;
 };
@@ -160,7 +159,12 @@ struct kvm {
 	int nmemslots;
 	struct kvm_memory_slot memslots[KVM_MEMORY_SLOTS +
 					KVM_PRIVATE_MEM_SLOTS];
+#ifdef CONFIG_KVM_APIC_ARCHITECTURE
+	u32 bsp_vcpu_id;
+	struct kvm_vcpu *bsp_vcpu;
+#endif
 	struct kvm_vcpu *vcpus[KVM_MAX_VCPUS];
+	atomic_t online_vcpus;
 	struct list_head vm_list;
 	struct mutex lock;
 	struct kvm_io_bus mmio_bus;
@@ -205,6 +209,17 @@ struct kvm {
 #define kvm_printf(kvm, fmt ...) printk(KERN_DEBUG fmt)
 #define vcpu_printf(vcpu, fmt...) kvm_printf(vcpu->kvm, fmt)
 
+static inline struct kvm_vcpu *kvm_get_vcpu(struct kvm *kvm, int i)
+{
+	smp_rmb();
+	return kvm->vcpus[i];
+}
+
+#define kvm_for_each_vcpu(idx, vcpup, kvm) \
+	for (idx = 0, vcpup = kvm_get_vcpu(kvm, idx); \
+	     idx < atomic_read(&kvm->online_vcpus) && vcpup; \
+	     vcpup = kvm_get_vcpu(kvm, ++idx))
+
 int kvm_vcpu_init(struct kvm_vcpu *vcpu, struct kvm *kvm, unsigned id);
 void kvm_vcpu_uninit(struct kvm_vcpu *vcpu);
 
@@ -239,6 +254,7 @@ int kvm_arch_set_memory_region(struct kvm *kvm,
 				struct kvm_userspace_memory_region *mem,
 				struct kvm_memory_slot old,
 				int user_alloc);
+void kvm_disable_largepages(void);
 void kvm_arch_flush_shadow(struct kvm *kvm);
 gfn_t unalias_gfn(struct kvm *kvm, gfn_t gfn);
 struct page *gfn_to_page(struct kvm *kvm, gfn_t gfn);
@@ -281,8 +297,6 @@ long kvm_arch_dev_ioctl(struct file *filp,
 			unsigned int ioctl, unsigned long arg);
 long kvm_arch_vcpu_ioctl(struct file *filp,
 			 unsigned int ioctl, unsigned long arg);
-void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu);
-void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu);
 
 int kvm_dev_ioctl_check_extension(long ext);
 
@@ -338,7 +352,6 @@ int kvm_arch_hardware_setup(void);
 void kvm_arch_hardware_unsetup(void);
 void kvm_arch_check_processor_compat(void *rtn);
 int kvm_arch_vcpu_runnable(struct kvm_vcpu *vcpu);
-int kvm_arch_interrupt_allowed(struct kvm_vcpu *vcpu);
 
 void kvm_free_physmem(struct kvm *kvm);
 
@@ -347,8 +360,6 @@ void kvm_arch_destroy_vm(struct kvm *kvm);
 void kvm_free_all_assigned_devices(struct kvm *kvm);
 void kvm_arch_sync_events(struct kvm *kvm);
 
-int kvm_cpu_get_interrupt(struct kvm_vcpu *v);
-int kvm_cpu_has_interrupt(struct kvm_vcpu *v);
 int kvm_cpu_has_pending_timer(struct kvm_vcpu *vcpu);
 void kvm_vcpu_kick(struct kvm_vcpu *vcpu);
 
@@ -502,37 +513,6 @@ struct kvm_stats_debugfs_item {
 extern struct kvm_stats_debugfs_item debugfs_entries[];
 extern struct dentry *kvm_debugfs_dir;
 
-#define KVMTRACE_5D(evt, vcpu, d1, d2, d3, d4, d5, name) \
-	trace_mark(kvm_trace_##name, "%u %p %u %u %u %u %u %u", KVM_TRC_##evt, \
-						vcpu, 5, d1, d2, d3, d4, d5)
-#define KVMTRACE_4D(evt, vcpu, d1, d2, d3, d4, name) \
-	trace_mark(kvm_trace_##name, "%u %p %u %u %u %u %u %u", KVM_TRC_##evt, \
-						vcpu, 4, d1, d2, d3, d4, 0)
-#define KVMTRACE_3D(evt, vcpu, d1, d2, d3, name) \
-	trace_mark(kvm_trace_##name, "%u %p %u %u %u %u %u %u", KVM_TRC_##evt, \
-						vcpu, 3, d1, d2, d3, 0, 0)
-#define KVMTRACE_2D(evt, vcpu, d1, d2, name) \
-	trace_mark(kvm_trace_##name, "%u %p %u %u %u %u %u %u", KVM_TRC_##evt, \
-						vcpu, 2, d1, d2, 0, 0, 0)
-#define KVMTRACE_1D(evt, vcpu, d1, name) \
-	trace_mark(kvm_trace_##name, "%u %p %u %u %u %u %u %u", KVM_TRC_##evt, \
-						vcpu, 1, d1, 0, 0, 0, 0)
-#define KVMTRACE_0D(evt, vcpu, name) \
-	trace_mark(kvm_trace_##name, "%u %p %u %u %u %u %u %u", KVM_TRC_##evt, \
-						vcpu, 0, 0, 0, 0, 0, 0)
-
-#ifdef CONFIG_KVM_TRACE
-int kvm_trace_ioctl(unsigned int ioctl, unsigned long arg);
-void kvm_trace_cleanup(void);
-#else
-static inline
-int kvm_trace_ioctl(unsigned int ioctl, unsigned long arg)
-{
-	return -EINVAL;
-}
-#define kvm_trace_cleanup() ((void)0)
-#endif
-
 #ifdef KVM_ARCH_WANT_MMU_NOTIFIER
 static inline int mmu_notifier_retry(struct kvm_vcpu *vcpu, unsigned long mmu_seq)
 {
@@ -591,4 +571,10 @@ static inline int kvm_ioeventfd(struct kvm *kvm, struct kvm_ioeventfd *args)
 
 #endif /* CONFIG_HAVE_KVM_EVENTFD */
 
+#ifdef CONFIG_KVM_APIC_ARCHITECTURE
+static inline bool kvm_vcpu_is_bsp(struct kvm_vcpu *vcpu)
+{
+	return vcpu->kvm->bsp_vcpu_id == vcpu->vcpu_id;
+}
+#endif
 #endif

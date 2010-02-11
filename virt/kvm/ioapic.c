@@ -36,6 +36,7 @@
 #include <asm/processor.h>
 #include <asm/page.h>
 #include <asm/current.h>
+#include <trace/events/kvm.h>
 
 #include "ioapic.h"
 #include "lapic.h"
@@ -103,6 +104,7 @@ static void ioapic_write_indirect(struct kvm_ioapic *ioapic, u32 val)
 {
 	unsigned index;
 	bool mask_before, mask_after;
+	union kvm_ioapic_redirect_entry *e;
 
 	switch (ioapic->ioregsel) {
 	case IOAPIC_REG_VERSION:
@@ -122,19 +124,20 @@ static void ioapic_write_indirect(struct kvm_ioapic *ioapic, u32 val)
 		ioapic_debug("change redir index %x val %x\n", index, val);
 		if (index >= IOAPIC_NUM_PINS)
 			return;
-		mask_before = ioapic->redirtbl[index].fields.mask;
+		e = &ioapic->redirtbl[index];
+		mask_before = e->fields.mask;
 		if (ioapic->ioregsel & 1) {
-			ioapic->redirtbl[index].bits &= 0xffffffff;
-			ioapic->redirtbl[index].bits |= (u64) val << 32;
+			e->bits &= 0xffffffff;
+			e->bits |= (u64) val << 32;
 		} else {
-			ioapic->redirtbl[index].bits &= ~0xffffffffULL;
-			ioapic->redirtbl[index].bits |= (u32) val;
-			ioapic->redirtbl[index].fields.remote_irr = 0;
+			e->bits &= ~0xffffffffULL;
+			e->bits |= (u32) val;
+			e->fields.remote_irr = 0;
 		}
-		mask_after = ioapic->redirtbl[index].fields.mask;
+		mask_after = e->fields.mask;
 		if (mask_before != mask_after)
 			kvm_fire_mask_notifiers(ioapic->kvm, index, mask_after);
-		if (ioapic->redirtbl[index].fields.trig_mode == IOAPIC_LEVEL_TRIG
+		if (e->fields.trig_mode == IOAPIC_LEVEL_TRIG
 		    && ioapic->irr & (1 << index))
 			ioapic_service(ioapic, index);
 		break;
@@ -164,7 +167,9 @@ static int ioapic_deliver(struct kvm_ioapic *ioapic, int irq)
 	/* Always delivery PIT interrupt to vcpu 0 */
 	if (irq == 0) {
 		irqe.dest_mode = 0; /* Physical mode. */
-		irqe.dest_id = ioapic->kvm->vcpus[0]->vcpu_id;
+		/* need to read apic_id from apic regiest since
+		 * it can be rewritten */
+		irqe.dest_id = ioapic->kvm->bsp_vcpu->vcpu_id;
 	}
 #endif
 	return kvm_irq_delivery_to_apic(ioapic->kvm, NULL, &irqe);
@@ -192,6 +197,7 @@ int kvm_ioapic_set_irq(struct kvm_ioapic *ioapic, int irq, int level)
 			else
 				ret = 0; /* report coalesced interrupt */
 		}
+		trace_kvm_ioapic_set_irq(entry.bits, irq, ret == 0);
 	}
 	mutex_unlock(&ioapic->lock);
 

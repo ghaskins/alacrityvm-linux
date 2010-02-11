@@ -20,6 +20,7 @@
  */
 
 #include <linux/kvm_host.h>
+#include <trace/events/kvm.h>
 
 #include <asm/msidef.h>
 #ifdef CONFIG_IA64
@@ -85,10 +86,8 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 			kvm_is_dm_lowest_prio(irq))
 		printk(KERN_INFO "kvm: apic: phys broadcast and lowest prio\n");
 
-	for (i = 0; i < KVM_MAX_VCPUS; i++) {
-		vcpu = kvm->vcpus[i];
-
-		if (!vcpu || !kvm_apic_present(vcpu))
+	kvm_for_each_vcpu(i, vcpu, kvm) {
+		if (!kvm_apic_present(vcpu))
 			continue;
 
 		if (!kvm_apic_match_dest(vcpu, src, irq->shorthand,
@@ -121,6 +120,8 @@ static int kvm_set_msi(struct kvm_kernel_irq_routing_entry *e,
 	if (!level)
 		return -1;
 
+	trace_kvm_msi_set_irq(e->msi.address_lo, e->msi.data);
+
 	irq.dest_id = (e->msi.address_lo &
 			MSI_ADDR_DEST_ID_MASK) >> MSI_ADDR_DEST_ID_SHIFT;
 	irq.vector = (e->msi.data &
@@ -147,6 +148,8 @@ int kvm_set_irq(struct kvm *kvm, int irq_source_id, u32 irq, int level)
 	int ret = -1, i = 0;
 	struct kvm_irq_routing_table *irq_rt;
 	struct hlist_node *n;
+
+	trace_kvm_set_irq(irq, level, irq_source_id);
 
 	/* Not possible to detect if the guest uses the PIC or the
 	 * IOAPIC.  So set the bit in both. The guest will ignore
@@ -205,6 +208,8 @@ void kvm_notify_acked_irq(struct kvm *kvm, unsigned irqchip, unsigned pin)
 	struct hlist_node *n;
 	int gsi;
 
+	trace_kvm_ack_irq(irqchip, pin);
+
 	rcu_read_lock();
 	gsi = rcu_dereference(kvm->irq_routing)->chip[irqchip][pin];
 	if (gsi != -1)
@@ -238,10 +243,9 @@ int kvm_request_irq_source_id(struct kvm *kvm)
 	int irq_source_id;
 
 	mutex_lock(&kvm->irq_lock);
-	irq_source_id = find_first_zero_bit(bitmap,
-				sizeof(kvm->arch.irq_sources_bitmap));
+	irq_source_id = find_first_zero_bit(bitmap, BITS_PER_LONG);
 
-	if (irq_source_id >= sizeof(kvm->arch.irq_sources_bitmap)) {
+	if (irq_source_id >= BITS_PER_LONG) {
 		printk(KERN_WARNING "kvm: exhaust allocatable IRQ sources!\n");
 		irq_source_id = -EFAULT;
 		goto unlock;
@@ -263,10 +267,14 @@ void kvm_free_irq_source_id(struct kvm *kvm, int irq_source_id)
 
 	mutex_lock(&kvm->irq_lock);
 	if (irq_source_id < 0 ||
-	    irq_source_id >= sizeof(kvm->arch.irq_sources_bitmap)) {
+	    irq_source_id >= BITS_PER_LONG) {
 		printk(KERN_ERR "kvm: IRQ source ID out of range!\n");
 		goto unlock;
 	}
+	clear_bit(irq_source_id, &kvm->arch.irq_sources_bitmap);
+	if (!irqchip_in_kernel(kvm))
+		goto unlock;
+
 	for (i = 0; i < KVM_IOAPIC_NUM_PINS; i++) {
 		clear_bit(irq_source_id, &kvm->arch.vioapic->irq_states[i]);
 		if (i >= 16)
@@ -275,7 +283,6 @@ void kvm_free_irq_source_id(struct kvm *kvm, int irq_source_id)
 		clear_bit(irq_source_id, &pic_irqchip(kvm)->irq_states[i]);
 #endif
 	}
-	clear_bit(irq_source_id, &kvm->arch.irq_sources_bitmap);
 unlock:
 	mutex_unlock(&kvm->irq_lock);
 }

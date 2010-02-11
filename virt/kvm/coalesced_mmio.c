@@ -23,7 +23,8 @@ static int coalesced_mmio_in_range(struct kvm_coalesced_mmio_dev *dev,
 				   gpa_t addr, int len)
 {
 	struct kvm_coalesced_mmio_zone *zone;
-	int next;
+	struct kvm_coalesced_mmio_ring *ring;
+	unsigned avail;
 	int i;
 
 	/* Are we able to batch it ? */
@@ -32,9 +33,9 @@ static int coalesced_mmio_in_range(struct kvm_coalesced_mmio_dev *dev,
 	 * check if we don't meet the first used entry
 	 * there is always one unused entry in the buffer
 	 */
-	next = (dev->kvm->coalesced_mmio_ring->last + 1) %
-							KVM_COALESCED_MMIO_MAX;
-	if (next == dev->kvm->coalesced_mmio_ring->first) {
+	ring = dev->kvm->coalesced_mmio_ring;
+	avail = (ring->first - ring->last - 1) % KVM_COALESCED_MMIO_MAX;
+	if (avail < KVM_MAX_VCPUS) {
 		/* full */
 		return 0;
 	}

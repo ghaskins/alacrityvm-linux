@@ -478,7 +478,7 @@ void ext4_add_groupblocks(handle_t *handle, struct super_block *sb,
 	 * new bitmap information
 	 */
 	set_bit(EXT4_GROUP_INFO_NEED_INIT_BIT, &(grp->bb_state));
-	ext4_mb_update_group_info(grp, blocks_freed);
+	grp->bb_free += blocks_freed;
 	up_write(&grp->alloc_sem);
 
 	/* We dirtied the bitmap block */
@@ -761,7 +761,13 @@ static unsigned long ext4_bg_num_gdb_meta(struct super_block *sb,
 static unsigned long ext4_bg_num_gdb_nometa(struct super_block *sb,
 					ext4_group_t group)
 {
-	return ext4_bg_has_super(sb, group) ? EXT4_SB(sb)->s_gdb_count : 0;
+	if (!ext4_bg_has_super(sb, group))
+		return 0;
+
+	if (EXT4_HAS_INCOMPAT_FEATURE(sb,EXT4_FEATURE_INCOMPAT_META_BG))
+		return le32_to_cpu(EXT4_SB(sb)->s_es->s_first_meta_bg);
+	else
+		return EXT4_SB(sb)->s_gdb_count;
 }
 
 /**

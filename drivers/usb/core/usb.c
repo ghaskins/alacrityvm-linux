@@ -132,7 +132,7 @@ EXPORT_SYMBOL_GPL(usb_altnum_to_altsetting);
 
 struct find_interface_arg {
 	int minor;
-	struct usb_interface *interface;
+	struct device_driver *drv;
 };
 
 static int __find_interface(struct device *dev, void *data)
@@ -143,12 +143,10 @@ static int __find_interface(struct device *dev, void *data)
 	if (!is_usb_interface(dev))
 		return 0;
 
+	if (dev->driver != arg->drv)
+		return 0;
 	intf = to_usb_interface(dev);
-	if (intf->minor != -1 && intf->minor == arg->minor) {
-		arg->interface = intf;
-		return 1;
-	}
-	return 0;
+	return intf->minor == arg->minor;
 }
 
 /**
@@ -156,21 +154,24 @@ static int __find_interface(struct device *dev, void *data)
  * @drv: the driver whose current configuration is considered
  * @minor: the minor number of the desired device
  *
- * This walks the driver device list and returns a pointer to the interface
- * with the matching minor.  Note, this only works for devices that share the
- * USB major number.
+ * This walks the bus device list and returns a pointer to the interface
+ * with the matching minor and driver.  Note, this only works for devices
+ * that share the USB major number.
  */
 struct usb_interface *usb_find_interface(struct usb_driver *drv, int minor)
 {
 	struct find_interface_arg argb;
-	int retval;
+	struct device *dev;
 
 	argb.minor = minor;
-	argb.interface = NULL;
-	/* eat the error, it will be in argb.interface */
-	retval = driver_for_each_device(&drv->drvwrap.driver, NULL, &argb,
-					__find_interface);
-	return argb.interface;
+	argb.drv = &drv->drvwrap.driver;
+
+	dev = bus_find_device(&usb_bus_type, NULL, &argb, __find_interface);
+
+	/* Drop reference count from bus_find_device */
+	put_device(dev);
+
+	return dev ? to_usb_interface(dev) : NULL;
 }
 EXPORT_SYMBOL_GPL(usb_find_interface);
 
@@ -311,7 +312,7 @@ static struct dev_pm_ops usb_device_pm_ops = {
 #endif	/* CONFIG_PM */
 
 
-static char *usb_nodename(struct device *dev)
+static char *usb_devnode(struct device *dev, mode_t *mode)
 {
 	struct usb_device *usb_dev;
 
@@ -324,7 +325,7 @@ struct device_type usb_device_type = {
 	.name =		"usb_device",
 	.release =	usb_release_dev,
 	.uevent =	usb_dev_uevent,
-	.nodename = 	usb_nodename,
+	.devnode = 	usb_devnode,
 	.pm =		&usb_device_pm_ops,
 };
 
@@ -413,8 +414,13 @@ struct usb_device *usb_alloc_dev(struct usb_device *parent,
 		} else {
 			snprintf(dev->devpath, sizeof dev->devpath,
 				"%s.%d", parent->devpath, port1);
-			dev->route = parent->route +
-				(port1 << ((parent->level - 1)*4));
+			/* Route string assumes hubs have less than 16 ports */
+			if (port1 < 15)
+				dev->route = parent->route +
+					(port1 << ((parent->level - 1)*4));
+			else
+				dev->route = parent->route +
+					(15 << ((parent->level - 1)*4));
 		}
 
 		dev->dev.parent = &parent->dev;
@@ -914,11 +920,11 @@ int usb_buffer_map_sg(const struct usb_device *dev, int is_in,
 			|| !(bus = dev->bus)
 			|| !(controller = bus->controller)
 			|| !controller->dma_mask)
-		return -1;
+		return -EINVAL;
 
 	/* FIXME generic api broken like pci, can't report errors */
 	return dma_map_sg(controller, sg, nents,
-			is_in ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
+			is_in ? DMA_FROM_DEVICE : DMA_TO_DEVICE) ? : -ENOMEM;
 }
 EXPORT_SYMBOL_GPL(usb_buffer_map_sg);
 
