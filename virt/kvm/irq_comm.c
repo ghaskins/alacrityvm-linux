@@ -330,6 +330,7 @@ static int setup_routing_entry(struct kvm_irq_routing_table *rt,
 {
 	int r = -EINVAL;
 	int delta;
+	unsigned max_pin;
 	struct kvm_kernel_irq_routing_entry *ei;
 	struct hlist_node *n;
 	bool lockless = ue->type == KVM_IRQ_ROUTING_MSI;
@@ -354,12 +355,15 @@ static int setup_routing_entry(struct kvm_irq_routing_table *rt,
 		switch (ue->u.irqchip.irqchip) {
 		case KVM_IRQCHIP_PIC_MASTER:
 			e->set = kvm_set_pic_irq;
+			max_pin = 16;
 			break;
 		case KVM_IRQCHIP_PIC_SLAVE:
 			e->set = kvm_set_pic_irq;
+			max_pin = 16;
 			delta = 8;
 			break;
 		case KVM_IRQCHIP_IOAPIC:
+			max_pin = KVM_IOAPIC_NUM_PINS;
 			e->set = kvm_set_ioapic_irq;
 			break;
 		default:
@@ -367,7 +371,7 @@ static int setup_routing_entry(struct kvm_irq_routing_table *rt,
 		}
 		e->irqchip.irqchip = ue->u.irqchip.irqchip;
 		e->irqchip.pin = ue->u.irqchip.pin + delta;
-		if (e->irqchip.pin >= KVM_IOAPIC_NUM_PINS)
+		if (e->irqchip.pin >= max_pin)
 			goto out;
 		rt->chip[ue->u.irqchip.irqchip][e->irqchip.pin] = ue->gsi;
 		break;

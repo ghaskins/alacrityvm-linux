@@ -43,7 +43,7 @@
 #include <linux/freezer.h>
 #include <linux/kthread.h>
 #include <linux/ktime.h>
-#include <linux/macvlan.h>
+#include <linux/if_macvlan.h>
 #include <linux/nsproxy.h>
 #include <net/net_namespace.h>
 
@@ -585,13 +585,13 @@ static struct net_device_ops venetmacv_netdev_ops = {
 	.ndo_get_stats          = venetmacv_netdev_stats,
 };
 
-static int macvenet_newlink(struct net_device *dev,
+static int macvenet_newlink(struct net *src_net, struct net_device *dev,
 			    struct nlattr *tb[], struct nlattr *data[])
 {
 	struct venetmacv_netdev *priv = netdev_priv(dev);
 	int err;
 
-	err = macvlan_newlink(dev, tb, data);
+	err = macvlan_newlink(src_net, dev, tb, data);
 	if (err)
 		goto out1;
 
@@ -605,12 +605,12 @@ out1:
 	return err;
 }
 
-static void macvenet_dellink(struct net_device *dev)
+static void macvenet_dellink(struct net_device *dev, struct list_head *head)
 {
 	struct venetmacv_netdev *priv = netdev_priv(dev);
 	struct venetmacv *vdev = priv->vdev;
 
-	macvlan_dellink(dev);
+	macvlan_dellink(dev, NULL);
 	priv->mvdev.receive = netif_rx;
 	if (vdev) {
 		dev_put(dev);
