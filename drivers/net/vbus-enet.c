@@ -798,17 +798,6 @@ vbus_enet_tx_start(struct sk_buff *skb, struct net_device *dev)
 
 	spin_lock_irqsave(&priv->lock, flags);
 
-	if (ioq_full(priv->tx.veq.queue, ioq_idxtype_valid)) {
-		/*
-		 * We must flow-control the kernel by disabling the
-		 * queue
-		 */
-		spin_unlock_irqrestore(&priv->lock, flags);
-		netif_stop_queue(dev);
-		dev_err(&priv->dev->dev, "tx on full queue bug\n");
-		return 1;
-	}
-
 	if (priv->evq.txc)
 		/*
 		 * We only need the inuse index when we use TXC
@@ -828,7 +817,17 @@ vbus_enet_tx_start(struct sk_buff *skb, struct net_device *dev)
 
 	ret = ioq_iter_seek(&iter, ioq_seek_tail, 0, 0);
 	BUG_ON(ret < 0);
-	BUG_ON(iter.desc->sown);
+
+	if (iter.desc->sown) {
+		/*
+		* We must flow-control the kernel by disabling the
+		* queue
+		*/
+		spin_unlock_irqrestore(&priv->lock, flags);
+		netif_stop_queue(dev);
+		dev_err(&priv->dev->dev, "tx on full queue bug\n");
+		return 1;
+	}
 
 	if (priv->sg) {
 		struct venet_sg *vsg = (struct venet_sg *)(unsigned long)iter.desc->cookie;
