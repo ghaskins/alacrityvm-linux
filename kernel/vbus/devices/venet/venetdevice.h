@@ -95,6 +95,7 @@ struct venetdev {
 			spinlock_t             lock;
 			struct vbus_shm       *shm;
 			struct venetdev_queue  queue;
+			struct list_head       txclist;
 			bool                   enabled;
 			bool                   linkstate;
 			bool                   txc;

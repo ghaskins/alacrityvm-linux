@@ -20,6 +20,9 @@
 #include <linux/interrupt.h>
 
 #include <linux/in.h>
+#define DEBUG
+#include <linux/device.h>
+#undef DEBUG
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/ethtool.h>
@@ -42,6 +45,7 @@ MODULE_VERSION("1");
 static int rx_ringlen = 256;
 module_param(rx_ringlen, int, 0444);
 static int tx_ringlen = 256;
+static int evq_ringlen = 128;
 module_param(tx_ringlen, int, 0444);
 static int sg_enabled = 1;
 module_param(sg_enabled, int, 0444);
@@ -1356,7 +1360,7 @@ vbus_enet_negcap(struct vbus_enet_priv *priv)
 	if (ret < 0)
 		return ret;
 
-	ret = vbus_enet_evq_negcap(priv, tx_ringlen);
+	ret = vbus_enet_evq_negcap(priv, evq_ringlen);
 	if (ret < 0)
 		return ret;
 

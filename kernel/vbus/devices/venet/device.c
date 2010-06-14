@@ -72,6 +72,7 @@ MODULE_PARM_DESC(maxcount, "maximum size for rx/tx ioq ring");
 #define L4RO_PAGEQ_ID 104
 
 static void venetdev_tx_isr(struct ioq_notifier *notifier);
+static void venetdev_txc_notifier(struct ioq_notifier *notifier);
 static int venetdev_rx_thread(void *__priv);
 static int venetdev_tx_thread(void *__priv);
 
@@ -79,7 +80,8 @@ static void evq_send_linkstatus(struct venetdev *priv, bool status);
 
 struct _venetdev_skb {
 	struct venetdev *priv;
-	u64 cookie;
+	u64              cookie;
+	struct list_head list;
 };
 
 static int
@@ -150,8 +152,9 @@ venetdev_evq_dpool_init(struct venetdev *priv,
 }
 
 static int
-venetdev_evq_queue_init(struct venetdev *priv,
-			struct vbus_shm *shm, struct shm_signal *signal)
+venetdev_evq_queue_init(struct venetdev *priv, struct vbus_shm *shm,
+			struct shm_signal *signal,
+			void (*func)(struct ioq_notifier *))
 {
 	int ret;
 
@@ -161,7 +164,7 @@ venetdev_evq_queue_init(struct venetdev *priv,
 	if (priv->vbus.evq.queue.queue)
 		return -EEXIST;
 
-	ret = venetdev_queue_init(&priv->vbus.evq.queue, shm, signal, NULL);
+	ret = venetdev_queue_init(&priv->vbus.evq.queue, shm, signal, func);
 	if (ret < 0)
 		return ret;
 
@@ -343,7 +346,7 @@ venetdev_change_mtu(struct net_device *dev, int new_mtu)
  * ---------------------------
  */
 
-static void
+static bool
 evq_send_event(struct venetdev *priv, struct venet_event_header *header,
 	       bool signal)
 {
@@ -366,8 +369,10 @@ evq_send_event(struct venetdev *priv, struct venet_event_header *header,
 	ret = ioq_iter_seek(&iter, ioq_seek_tail, 0, 0);
 	BUG_ON(ret < 0);
 
-	/* FIXME */
-	BUG_ON(!iter.desc->sown);
+	if (!iter.desc->sown) {
+		spin_unlock_irqrestore(&priv->vbus.evq.lock, flags);
+		return true; /* backpressure */
+	}
 
 	offset = (size_t)le64_to_cpu(iter.desc->ptr);
 	ptr = priv->vbus.evq.shm->ptr + offset;
@@ -388,6 +393,8 @@ out:
 
 	if (signal)
 		ioq_signal(ioq, 0);
+
+	return false;
 }
 
 static void
@@ -405,7 +412,7 @@ evq_send_linkstatus(struct venetdev *priv, bool status)
 		evq_send_event(priv, &event.header, true);
 }
 
-static void
+static bool
 evq_send_txc(struct venetdev *priv, u64 cookie)
 {
 	struct venet_event_txc event = {
@@ -417,7 +424,7 @@ evq_send_txc(struct venetdev *priv, u64 cookie)
 		.cookie = cookie,
 	};
 
-	evq_send_event(priv, &event.header, false);
+	return evq_send_event(priv, &event.header, false);
 }
 
 /*
@@ -707,6 +714,7 @@ venetdev_sg_import_copy(struct venetdev *priv,
 	venet_sg_iter_init(&iter, vsg, priv->vbus.ctx);
 
 	ret = venet_sg_iter_copy(&iter, skb->data, vsg->len);
+
 	if (ret)
 		kfree_skb(skb);
 
@@ -871,17 +879,13 @@ venetdev_flat_import(struct venetdev *priv, void *ptr, int len)
 }
 
 static void
-venetdev_skb_release(struct sk_buff *skb)
+venetdev_skb_complete(struct _venetdev_skb *_skb)
 {
-	struct _venetdev_skb *_skb
-		= (struct _venetdev_skb *)skb_shinfo(skb)->priv;
 	struct venetdev *priv = _skb->priv;
 	unsigned long flags;
 	bool signal = false;
 
 	spin_lock_irqsave(&priv->lock, flags);
-
-	evq_send_txc(priv, _skb->cookie);
 
 	if (atomic_dec_and_test(&priv->netif.rxq.outstanding))
 		/*
@@ -914,6 +918,71 @@ venetdev_skb_release(struct sk_buff *skb)
 	kfree(_skb);
 }
 
+static struct _venetdev_skb*
+venetdev_dequeue_txclist(struct venetdev *priv)
+{
+	struct _venetdev_skb *skb;
+	unsigned long flags;
+	spin_lock_irqsave(&priv->vbus.evq.lock, flags);
+	if (!list_empty(&priv->vbus.evq.txclist)) {
+		skb = list_first_entry(&priv->vbus.evq.txclist,
+					struct _venetdev_skb, list);
+		list_del(&skb->list);
+	} else {
+		skb = NULL;
+	}
+	spin_unlock_irqrestore(&priv->vbus.evq.lock, flags);
+	return skb;
+}
+
+static void
+venetdev_queue_txclist(struct venetdev *priv, struct _venetdev_skb *skb)
+{
+	unsigned long flags;
+	spin_lock_irqsave(&priv->vbus.evq.lock, flags);
+	list_add_tail(&skb->list, &priv->vbus.evq.txclist);
+	spin_unlock_irqrestore(&priv->vbus.evq.lock, flags);
+}
+
+static void
+venetdev_txc_drain(struct venetdev *priv)
+{
+	struct _venetdev_skb *_skb;
+	struct ioq *_ioq = priv->vbus.evq.queue.queue;
+
+	while ((_skb = venetdev_dequeue_txclist(priv))) {
+		if (evq_send_txc(priv, _skb->cookie)) {
+			venetdev_queue_txclist(priv, _skb);
+			ioq_notify_enable(_ioq, 0);
+			return;
+		}
+		venetdev_skb_complete(_skb);
+	}
+	ioq_notify_disable(_ioq, 0);
+}
+
+static void
+venetdev_txc_notifier(struct ioq_notifier *notifier)
+{
+	struct venetdev *priv;
+
+	priv = container_of(notifier, struct venetdev, vbus.evq.queue.notifier);
+
+	venetdev_txc_drain(priv);
+}
+
+static void
+venetdev_skb_release(struct sk_buff *skb)
+{
+	struct _venetdev_skb *_skb
+		= (struct _venetdev_skb *)skb_shinfo(skb)->priv;
+	struct venetdev *priv = _skb->priv;
+
+	venetdev_queue_txclist(priv, _skb);
+
+	venetdev_txc_drain(priv);
+}
+
 /*
  * default out to netif_rx_ni.
  */
@@ -943,6 +1012,7 @@ venetdev_rx(struct venetdev *priv)
 	int                         ret;
 	unsigned long               flags;
 	struct vbus_connection     *conn;
+	struct _venetdev_skb       *_skb;
 
 	PDEBUG("polling...\n");
 
@@ -1034,8 +1104,23 @@ next:
 		ret = ioq_iter_pop(&iter, 0);
 		BUG_ON(ret < 0);
 
-		if (txc)
-			evq_send_txc(priv, cookie);
+		if (txc && evq_send_txc(priv, cookie)) {
+			_skb = kzalloc(sizeof(*_skb), GFP_ATOMIC);
+			if (!_skb) {
+				printk(KERN_INFO "VENETDEV: " \
+				"skb alloc failed: "	\
+				"memory squeeze.\n");
+				priv->netif.stats.tx_dropped++;
+				kfree_skb(skb);
+			} else {
+				_skb->priv   = priv;
+				_skb->cookie = cookie;
+
+				skb_shinfo(skb)->priv    = _skb;
+				venetdev_queue_txclist(priv, _skb);
+				venetdev_txc_drain(priv);
+			}
+		}
 
 		/* send up to N packets before sending tx-complete */
 		if (dirty && (!priv->txmitigation
@@ -2002,6 +2087,7 @@ venetdev_flushrx(struct venetdev *priv)
 
 void venetdev_common_init(struct venetdev *device)
 {
+	INIT_LIST_HEAD(&device->vbus.evq.txclist);
 	device->vbus.import      = &venetdev_flat_import;
 	device->vbus.export      = &venetdev_flat_export;
 	init_waitqueue_head(&device->vbus.rx_empty);
@@ -2167,7 +2253,8 @@ venetdev_vlink_shm(struct vbus_connection *conn,
 	case EVQ_DPOOL_ID:
 		return venetdev_evq_dpool_init(priv, shm, signal);
 	case EVQ_QUEUE_ID:
-		return venetdev_evq_queue_init(priv, shm, signal);
+		return venetdev_evq_queue_init(priv, shm, signal,
+					       venetdev_txc_notifier);
 	case L4RO_DPOOL_ID:
 		return venetdev_l4ro_dpool_init(priv, shm, signal);
 	case L4RO_PAGEQ_ID:
