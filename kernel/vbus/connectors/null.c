@@ -7,6 +7,7 @@
 #include <linux/vbus_client.h>
 #include <linux/vbus_driver.h>
 #include <linux/list.h>
+#include <linux/slab.h>
 
 MODULE_AUTHOR("Gregory Haskins");
 MODULE_LICENSE("GPL");

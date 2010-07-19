@@ -6,6 +6,7 @@
 #include <linux/random.h>
 #include <linux/vbus.h>
 #include <linux/vbus_admin.h>
+#include <linux/slab.h>
 
 #include "vbus.h"
 

@@ -12,6 +12,7 @@
 #include <linux/kvm_xinterface.h>
 #include <linux/shm_signal_eventfd.h>
 #include <linux/eventfd.h>
+#include <linux/slab.h>
 
 #include <linux/vbus.h>
 #include <linux/vbus_kvm.h>

@@ -23,6 +23,7 @@
 
 #include <linux/ioq.h>
 #include <linux/vbus_device.h>
+#include <linux/slab.h>
 
 struct _ioq {
 	struct vbus_shm *shm;

@@ -25,6 +25,7 @@
 #include <linux/shm_signal.h>
 #include <linux/workqueue.h>
 #include <linux/eventfd.h>
+#include <linux/slab.h>
 
 /*
  * ---------------------------------------------

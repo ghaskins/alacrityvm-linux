@@ -785,9 +785,10 @@ venetdev_sg_import(struct venetdev *priv, void *ptr, int len)
 		return NULL;
 	}
 
-	if (vsg->phdr.mac != ~0U)
-		skb_set_mac_header(skb, vsg->phdr.mac);
+	if (vsg->phdr.mac == ~0U || vsg->phdr.mac == 0)
+		PDEBUG("mac header invalid!!!\n");
 
+	skb_reset_mac_header(skb);
 	skb_set_network_header(skb, vsg->phdr.network);
 	skb_set_transport_header(skb, vsg->phdr.transport);
 

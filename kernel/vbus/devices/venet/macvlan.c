@@ -99,12 +99,11 @@ struct venetmacv *vbusdev_to_macv(struct vbus_device *vdev)
 	return container_of(vdev, struct venetmacv, dev.vbus.dev);
 }
 
-static int venetmacv_receive(struct sk_buff *skb)
+static int venetmacv_forward(struct net_device *dev, struct sk_buff *skb)
 {
-	struct venetmacv_netdev *priv = netdev_priv(skb->dev);
+	struct venetmacv_netdev *priv = netdev_priv(dev);
 	struct venetmacv *macv = priv->vdev;
 	int err;
-
 
 	if (!macv) {
 		PDEBUG("venetmacv_receive: vbus dev not connected \
@@ -123,8 +122,13 @@ static int venetmacv_receive(struct sk_buff *skb)
 		kfree_skb(skb);
 		return -1;
 	}
-	skb_push(skb, ETH_HLEN);
 	return venetdev_xmit(skb, &macv->dev);
+}
+
+static int venetmacv_receive(struct sk_buff *skb)
+{
+	skb_push(skb, ETH_HLEN);
+	return venetmacv_forward(skb->dev, skb);
 }
 
 static void
@@ -240,7 +244,7 @@ venetmacv_intf_connect(struct vbus_device_interface *intf,
 
 	*conn = &macv->dev.vbus.conn;
 
-	return 0;
+	return;
 }
 
 static void
@@ -591,11 +595,11 @@ static int macvenet_newlink(struct net *src_net, struct net_device *dev,
 	struct venetmacv_netdev *priv = netdev_priv(dev);
 	int err;
 
-	err = macvlan_newlink(src_net, dev, tb, data);
+	err = macvlan_common_newlink(src_net, dev, tb, data,
+				venetmacv_receive, venetmacv_forward);
 	if (err)
 		goto out1;
 
-	priv->mvdev.receive = venetmacv_receive;
 	priv->macvlan_netdev_ops = dev->netdev_ops;
 	dev->netdev_ops = &venetmacv_netdev_ops;
 
@@ -612,6 +616,7 @@ static void macvenet_dellink(struct net_device *dev, struct list_head *head)
 
 	macvlan_dellink(dev, NULL);
 	priv->mvdev.receive = netif_rx;
+	priv->mvdev.forward = dev_forward_skb;
 	if (vdev) {
 		dev_put(dev);
 		vdev->dev.netif.dev = NULL;

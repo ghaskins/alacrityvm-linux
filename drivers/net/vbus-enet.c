@@ -50,7 +50,7 @@ module_param(tx_ringlen, int, 0444);
 static int sg_enabled = 1;
 module_param(sg_enabled, int, 0444);
 
-#define PDEBUG(_dev, fmt, args...) dev_dbg(&(_dev)->dev, fmt, ## args)
+#define PDEBUG(_dev, fmt, args...)
 
 #define SG_DESC_SIZE VSG_DESC_SIZE(MAX_SKB_FRAGS)
 
@@ -846,13 +846,16 @@ vbus_enet_tx_start(struct sk_buff *skb, struct net_device *dev)
 		vsg->cookie = (u64)(unsigned long)skb;
 		vsg->len    = skb->len;
 
-		vsg->phdr.transport = skb_transport_header(skb) - skb->head;
-		vsg->phdr.network   = skb_network_header(skb) - skb->head;
+		if (!skb_mac_header_was_set(skb))
+			skb_reset_mac_header(skb);
 
-		if (skb_mac_header_was_set(skb))
-			vsg->phdr.mac = skb_mac_header(skb) - skb->head;
-		else
-			vsg->phdr.mac = ~0U;
+		/* the following vsg members are now offsets from
+		   the beginning of the mac heaser(mac=0 now). */
+		vsg->phdr.mac = 0;
+		vsg->phdr.network   = skb_network_header(skb)
+						- skb_mac_header(skb);
+		vsg->phdr.transport = skb_transport_header(skb)
+						- skb_mac_header(skb);
 
 		if (skb->ip_summed == CHECKSUM_PARTIAL) {
 			vsg->flags      |= VENET_SG_FLAG_NEEDS_CSUM;

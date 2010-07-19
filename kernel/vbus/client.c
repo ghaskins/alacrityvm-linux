@@ -5,6 +5,7 @@
 #include <linux/uaccess.h>
 #include <linux/vbus.h>
 #include <linux/vbus_client.h>
+#include <linux/slab.h>
 #include "vbus.h"
 
 static int

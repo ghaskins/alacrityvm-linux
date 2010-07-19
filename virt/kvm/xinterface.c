@@ -27,6 +27,7 @@
 #include <linux/mmu_context.h>
 #include <linux/kvm_host.h>
 #include <linux/kvm_xinterface.h>
+#include <linux/slab.h>
 
 #include "iodev.h"
 
@@ -47,7 +48,7 @@ struct _xvmap {
 struct _ioevent {
 	u64                   addr;
 	int                   length;
-	struct kvm_io_bus    *bus;
+	enum kvm_bus          bus;
 	struct kvm_io_device  dev;
 	struct kvm_xioevent   ioevent;
 };
@@ -216,7 +217,7 @@ xinterface_copy_to(struct kvm_xinterface *intf, unsigned long gpa,
 	unsigned long dst;
 	bool kthread = !current->mm;
 
-	down_read(&_intf->kvm->slots_lock);
+	mutex_lock(&_intf->kvm->slots_lock);
 
 	dst = gpa_to_hva(_intf, gpa);
 	if (!dst)
@@ -234,7 +235,7 @@ xinterface_copy_to(struct kvm_xinterface *intf, unsigned long gpa,
 		unuse_mm(_intf->mm);
 
 out:
-	up_read(&_intf->kvm->slots_lock);
+	mutex_unlock(&_intf->kvm->slots_lock);
 
 	return n;
 }
@@ -290,7 +291,7 @@ xinterface_copy_from(struct kvm_xinterface *intf, void *dst,
 	unsigned long src;
 	bool kthread = !current->mm;
 
-	down_read(&_intf->kvm->slots_lock);
+	mutex_lock(&_intf->kvm->slots_lock);
 
 	src = gpa_to_hva(_intf, gpa);
 	if (!src)
@@ -308,7 +309,7 @@ xinterface_copy_from(struct kvm_xinterface *intf, void *dst,
 		unuse_mm(_intf->mm);
 
 out:
-	up_read(&_intf->kvm->slots_lock);
+	mutex_unlock(&_intf->kvm->slots_lock);
 
 	return n;
 }
@@ -328,7 +329,7 @@ xinterface_vmap(struct kvm_xinterface *intf,
 	unsigned long               gfn = gpa >> PAGE_SHIFT;
 	unsigned long               npages;
 
-	down_read(&kvm->slots_lock);
+	mutex_lock(&kvm->slots_lock);
 
 	memslot = gfn_to_memslot(kvm, gfn);
 	if (!memslot)
@@ -359,7 +360,7 @@ xinterface_vmap(struct kvm_xinterface *intf,
 	_xvmap->vmap.addr = addr;
 	_xvmap->vmap.len  = len;
 
-	up_read(&kvm->slots_lock);
+	mutex_unlock(&kvm->slots_lock);
 
 	return &_xvmap->vmap;
 
@@ -367,7 +368,7 @@ fail:
 	if (addr)
 		_vunmap(_intf, addr, len);
 
-	up_read(&kvm->slots_lock);
+	mutex_unlock(&kvm->slots_lock);
 
 	return ERR_PTR(ret);
 }
@@ -417,7 +418,8 @@ xinterface_ioevent(struct kvm_xinterface *intf,
 	struct _xinterface         *_intf = to_intf(intf);
 	struct kvm                 *kvm = _intf->kvm;
 	int                         pio = flags & KVM_XIOEVENT_FLAG_PIO;
-	struct kvm_io_bus          *bus = pio ? &kvm->pio_bus : &kvm->mmio_bus;
+	enum kvm_bus                bus_idx = pio ? KVM_PIO_BUS : KVM_MMIO_BUS;
+
 	struct _ioevent            *p;
 	int                         ret;
 
@@ -448,11 +450,11 @@ xinterface_ioevent(struct kvm_xinterface *intf,
 
 	p->addr    = addr;
 	p->length  = len;
-	p->bus     = bus;
+	p->bus     = bus_idx;
 
 	kvm_iodevice_init(&p->dev, &ioevent_device_ops);
 
-	ret = kvm_io_bus_register_dev(kvm, bus, &p->dev);
+	ret = kvm_io_bus_register_dev(kvm, bus_idx, &p->dev);
 	if (ret < 0)
 		goto fail;
 
@@ -482,7 +484,7 @@ xinterface_sgmap(struct kvm_xinterface *intf,
 	struct scatterlist     *sg;
 	int                     i;
 
-	down_read(&kvm->slots_lock);
+	mutex_lock(&kvm->slots_lock);
 
 	if (kthread)
 		use_mm(_intf->mm);
@@ -533,7 +535,7 @@ xinterface_sgmap(struct kvm_xinterface *intf,
 	if (kthread)
 		unuse_mm(_intf->mm);
 
-	up_read(&kvm->slots_lock);
+	mutex_unlock(&kvm->slots_lock);
 
 	return ret;
 }
