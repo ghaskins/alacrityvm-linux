@@ -1,5 +1,5 @@
 /*
- * Implements a "null connector" for vbus as an example of what needs to
+ * Implements a "localhost connector" for vbus as an example of what needs to
  * be implemented for a basic connector
  */
 
@@ -30,12 +30,12 @@ static int downcall_shmsignal(unsigned int handle);
  *------------------------------------------------------------------
  */
 
-struct vbus_null_guest {
+struct vbus_localhost_guest {
 	struct mutex           lock;
 	struct radix_tree_root devices;
 };
 
-static struct vbus_null_guest _null_guest;
+static struct vbus_localhost_guest _localhost_guest;
 
 /*
  * ---------------
@@ -183,9 +183,9 @@ guest_device_shm(struct vbus_device_proxy *dev, const char *name, int id,
 
 		_signal->handle = ret;
 
-		mutex_lock(&_null_guest.lock);
+		mutex_lock(&_localhost_guest.lock);
 		list_add_tail(&_signal->list, &_dev->shms);
-		mutex_unlock(&_null_guest.lock);
+		mutex_unlock(&_localhost_guest.lock);
 
 		shm_signal_get(&_signal->signal);
 		*signal = &_signal->signal;
@@ -239,10 +239,10 @@ upcall_devadd(const char *type, unsigned long id)
 
 	INIT_LIST_HEAD(&_dev->shms);
 
-	mutex_lock(&_null_guest.lock);
-	ret = radix_tree_insert(&_null_guest.devices, id, _dev);
+	mutex_lock(&_localhost_guest.lock);
+	ret = radix_tree_insert(&_localhost_guest.devices, id, _dev);
 	BUG_ON(ret < 0);
-	mutex_unlock(&_null_guest.lock);
+	mutex_unlock(&_localhost_guest.lock);
 
 	ret = vbus_device_proxy_register(&_dev->dev);
 	BUG_ON(ret < 0);
@@ -253,9 +253,9 @@ upcall_devdrop(unsigned long id)
 {
 	struct guest_device *_dev;
 
-	mutex_lock(&_null_guest.lock);
-	_dev = radix_tree_delete(&_null_guest.devices, id);
-	mutex_unlock(&_null_guest.lock);
+	mutex_lock(&_localhost_guest.lock);
+	_dev = radix_tree_delete(&_localhost_guest.devices, id);
+	mutex_unlock(&_localhost_guest.lock);
 
 	BUG_ON(!_dev);
 
@@ -283,14 +283,14 @@ upcall_shmclose(unsigned long cookie)
  *------------------------------------------------------------------
  */
 
-struct vbus_null_host {
+struct vbus_localhost_host {
 	struct vbus           *vbus;
 	struct vbus_client    *client;
 	struct vbus_memctx     ctx;
 	struct notifier_block  notify;
 };
 
-static struct vbus_null_host _null_host;
+static struct vbus_localhost_host _localhost_host;
 
 /*
  * ---------------
@@ -353,7 +353,7 @@ static struct vbus_shm_ops _shm_ops = {
 /*
  * We would normally want to take the ptr/len and translate the
  * gpa and vmap it into our address space.  Since this is a trivial
- * NULL example that lives in the same kernel address space, we simply
+ * LOCALHOST example that lives in the same kernel address space, we simply
  * just set the pointer directly.
  */
 static struct vbus_shm *
@@ -379,14 +379,14 @@ _shmap(void *ptr, size_t len)
 static int
 downcall_devopen(unsigned int id, unsigned int version, u64 *handle)
 {
-	struct vbus_client *c = _null_host.client;
-	return c->ops->deviceopen(c, &_null_host.ctx, id, version, handle);
+	struct vbus_client *c = _localhost_host.client;
+	return c->ops->deviceopen(c, &_localhost_host.ctx, id, version, handle);
 }
 
 static int
 downcall_devclose(u64 handle)
 {
-	struct vbus_client *c = _null_host.client;
+	struct vbus_client *c = _localhost_host.client;
 	return c->ops->deviceclose(c, handle);
 }
 
@@ -394,7 +394,7 @@ static int
 downcall_devshm(u64 devh, unsigned int id, void *ptr, size_t len,
 		size_t offset, unsigned long cookie)
 {
-	struct vbus_client    *c = _null_host.client;
+	struct vbus_client    *c = _localhost_host.client;
 	struct shm_signal     *signal = NULL;
 	struct vbus_shm       *shm;
 	unsigned int           handle;
@@ -449,14 +449,14 @@ out:
 static int
 downcall_devcall(u64 handle, u32 func, void *data, size_t len, int flags)
 {
-	struct vbus_client *c = _null_host.client;
+	struct vbus_client *c = _localhost_host.client;
 	return c->ops->devicecall(c, handle, func, data, len, flags);
 }
 
 static int
 downcall_shmsignal(unsigned int handle)
 {
-	struct vbus_client *c = _null_host.client;
+	struct vbus_client *c = _localhost_host.client;
 	return c->ops->shmsignal(c, handle);
 }
 
@@ -520,28 +520,28 @@ static struct vbus_memctx_ops _memctx_ops = {
 };
 
 static int __init
-vbus_null_init(void)
+vbus_localhost_init(void)
 {
 	struct vbus *vbus;
 	struct vbus_client *client;
 	int ret;
 
-	mutex_init(&_null_guest.lock);
-	INIT_RADIX_TREE(&_null_guest.devices, GFP_KERNEL);
+	mutex_init(&_localhost_guest.lock);
+	INIT_RADIX_TREE(&_localhost_guest.devices, GFP_KERNEL);
 
 	/*
-	 * Attach to a pre-named bus ("null-bus").  Normally, you may
+	 * Attach to a pre-named bus ("localhost-bus").  Normally, you may
 	 * want use task_vbus_get(current) to associate with whatever
 	 * container is assigned to the current process.  Since this
 	 * is an example, we will keep things simple
 	 */
-	vbus = vbus_find("null-bus");
+	vbus = vbus_find("localhost-bus");
 	if (!vbus) {
-		printk(KERN_ERR "could not attach to \"null-bus\"\n");
+		printk(KERN_ERR "could not attach to \"localhost-bus\"\n");
 		return -EINVAL;
 	}
 
-	_null_host.vbus = vbus;
+	_localhost_host.vbus = vbus;
 
 	/*
 	 * A client interface makes certain connector tasks easier.  It
@@ -553,16 +553,16 @@ vbus_null_init(void)
 		return -ENOMEM;
 	}
 
-	_null_host.client = client;
+	_localhost_host.client = client;
 
-	vbus_memctx_init(&_null_host.ctx, &_memctx_ops);
+	vbus_memctx_init(&_localhost_host.ctx, &_memctx_ops);
 
 	/*
 	 * Register to be notified when the container is modified
 	 */
-	_null_host.notify.notifier_call = hotswap_notifier;
-	_null_host.notify.priority = 0;
-	ret = vbus_notifier_register(vbus, &_null_host.notify);
+	_localhost_host.notify.notifier_call = hotswap_notifier;
+	_localhost_host.notify.priority = 0;
+	ret = vbus_notifier_register(vbus, &_localhost_host.notify);
 	if (ret < 0) {
 		vbus_client_put(client);
 		vbus_put(vbus);
@@ -573,14 +573,14 @@ vbus_null_init(void)
 }
 
 static void __exit
-vbus_null_cleanup(void)
+vbus_localhost_cleanup(void)
 {
-	if (_null_host.client)
-		vbus_client_put(_null_host.client);
+	if (_localhost_host.client)
+		vbus_client_put(_localhost_host.client);
 
-	if (_null_host.vbus)
-		vbus_put(_null_host.vbus);
+	if (_localhost_host.vbus)
+		vbus_put(_localhost_host.vbus);
 }
 
-module_init(vbus_null_init);
-module_exit(vbus_null_cleanup);
+module_init(vbus_localhost_init);
+module_exit(vbus_localhost_cleanup);
