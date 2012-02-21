@@ -48,12 +48,6 @@ const char *get_system_type(void)
 	return "Alchemy Pb1200";
 }
 
-void board_reset(void)
-{
-	bcsr_write(BCSR_RESETS, 0);
-	bcsr_write(BCSR_SYSTEM, 0);
-}
-
 void __init board_setup(void)
 {
 	printk(KERN_INFO "AMD Alchemy Pb1200 Board\n");
@@ -148,7 +142,7 @@ static int __init pb1200_init_irq(void)
 		panic("Game over.  Your score is 0.");
 	}
 
-	set_irq_type(AU1200_GPIO7_INT, IRQF_TRIGGER_LOW);
+	irq_set_irq_type(AU1200_GPIO7_INT, IRQF_TRIGGER_LOW);
 	bcsr_init_irq(PB1200_INT_BEGIN, PB1200_INT_END, AU1200_GPIO7_INT);
 
 	return 0;

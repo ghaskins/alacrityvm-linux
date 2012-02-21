@@ -16,11 +16,13 @@
 #include <linux/thread_info.h>
 #include <linux/irqflags.h>
 #include <linux/smp.h>
+#include <linux/cpuidle.h>
 #include <asm/pgalloc.h>
 #include <asm/system.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
+#include <asm/smp.h>
 
-void (*pm_idle)(void) = NULL;
+void (*pm_idle)(void);
 
 static int hlt_counter;
 
@@ -89,14 +91,18 @@ void cpu_idle(void)
 	while (1) {
 		tick_nohz_stop_sched_tick(1);
 
-		while (!need_resched() && cpu_online(cpu)) {
+		while (!need_resched()) {
 			check_pgt_cache();
 			rmb();
+
+			if (cpu_is_offline(cpu))
+				play_dead();
 
 			local_irq_disable();
 			/* Don't trace irqs off for idle */
 			stop_critical_timings();
-			pm_idle();
+			if (cpuidle_idle_call())
+				pm_idle();
 			/*
 			 * Sanity check to ensure that pm_idle() returns
 			 * with IRQs enabled
@@ -133,7 +139,7 @@ static void do_nothing(void *unused)
 void stop_this_cpu(void *unused)
 {
 	local_irq_disable();
-	cpu_clear(smp_processor_id(), cpu_online_map);
+	set_cpu_online(smp_processor_id(), false);
 
 	for (;;)
 		cpu_sleep();

@@ -29,7 +29,7 @@
 #include <linux/backlight.h>
 #include <linux/timer.h>
 #include <linux/workqueue.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 
 #define APPLE_VENDOR_ID		0x05AC
 
@@ -259,7 +259,7 @@ static int appledisplay_probe(struct usb_interface *iface,
 	}
 
 	/* Allocate buffer for interrupt data */
-	pdata->urbdata = usb_buffer_alloc(pdata->udev, ACD_URB_BUFFER_LEN,
+	pdata->urbdata = usb_alloc_coherent(pdata->udev, ACD_URB_BUFFER_LEN,
 		GFP_KERNEL, &pdata->urb->transfer_dma);
 	if (!pdata->urbdata) {
 		retval = -ENOMEM;
@@ -282,6 +282,7 @@ static int appledisplay_probe(struct usb_interface *iface,
 	snprintf(bl_name, sizeof(bl_name), "appledisplay%d",
 		atomic_inc_return(&count_displays) - 1);
 	memset(&props, 0, sizeof(struct backlight_properties));
+	props.type = BACKLIGHT_RAW;
 	props.max_brightness = 0xff;
 	pdata->bd = backlight_device_register(bl_name, NULL, pdata,
 					      &appledisplay_bl_data, &props);
@@ -316,7 +317,7 @@ error:
 		if (pdata->urb) {
 			usb_kill_urb(pdata->urb);
 			if (pdata->urbdata)
-				usb_buffer_free(pdata->udev, ACD_URB_BUFFER_LEN,
+				usb_free_coherent(pdata->udev, ACD_URB_BUFFER_LEN,
 					pdata->urbdata, pdata->urb->transfer_dma);
 			usb_free_urb(pdata->urb);
 		}
@@ -337,7 +338,7 @@ static void appledisplay_disconnect(struct usb_interface *iface)
 		usb_kill_urb(pdata->urb);
 		cancel_delayed_work(&pdata->work);
 		backlight_device_unregister(pdata->bd);
-		usb_buffer_free(pdata->udev, ACD_URB_BUFFER_LEN,
+		usb_free_coherent(pdata->udev, ACD_URB_BUFFER_LEN,
 			pdata->urbdata, pdata->urb->transfer_dma);
 		usb_free_urb(pdata->urb);
 		kfree(pdata->msgdata);

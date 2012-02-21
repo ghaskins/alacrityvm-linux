@@ -26,6 +26,7 @@
 #include <linux/etherdevice.h>
 #include <linux/spinlock.h>
 #include <linux/device.h>
+#include <linux/export.h>
 #include "i2400m.h"
 
 
@@ -119,6 +120,7 @@ const struct file_operations i2400m_rx_stats_fops = {
 	.open =		i2400m_stats_open,
 	.read =		i2400m_rx_stats_read,
 	.write =	i2400m_rx_stats_write,
+	.llseek =	default_llseek,
 };
 
 
@@ -171,6 +173,7 @@ const struct file_operations i2400m_tx_stats_fops = {
 	.open =		i2400m_stats_open,
 	.read =		i2400m_tx_stats_read,
 	.write =	i2400m_tx_stats_write,
+	.llseek =	default_llseek,
 };
 
 

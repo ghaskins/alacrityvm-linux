@@ -58,10 +58,9 @@ static inline int ad7414_temp_from_reg(s16 reg)
 
 static inline int ad7414_read(struct i2c_client *client, u8 reg)
 {
-	if (reg == AD7414_REG_TEMP) {
-		int value = i2c_smbus_read_word_data(client, reg);
-		return (value < 0) ? value : swab16(value);
-	} else
+	if (reg == AD7414_REG_TEMP)
+		return i2c_smbus_read_word_swapped(client, reg);
+	else
 		return i2c_smbus_read_byte_data(client, reg);
 }
 
@@ -178,11 +177,13 @@ static int ad7414_probe(struct i2c_client *client,
 {
 	struct ad7414_data *data;
 	int conf;
-	int err = 0;
+	int err;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA |
-				     I2C_FUNC_SMBUS_READ_WORD_DATA))
+				     I2C_FUNC_SMBUS_READ_WORD_DATA)) {
+		err = -EOPNOTSUPP;
 		goto exit;
+	}
 
 	data = kzalloc(sizeof(struct ad7414_data), GFP_KERNEL);
 	if (!data) {
@@ -240,6 +241,7 @@ static const struct i2c_device_id ad7414_id[] = {
 	{ "ad7414", 0 },
 	{}
 };
+MODULE_DEVICE_TABLE(i2c, ad7414_id);
 
 static struct i2c_driver ad7414_driver = {
 	.driver = {

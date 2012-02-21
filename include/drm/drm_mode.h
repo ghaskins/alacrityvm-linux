@@ -74,6 +74,7 @@
 /* Dithering mode options */
 #define DRM_MODE_DITHERING_OFF	0
 #define DRM_MODE_DITHERING_ON	1
+#define DRM_MODE_DITHERING_AUTO 2
 
 /* Dirty info options */
 #define DRM_MODE_DIRTY_OFF      0
@@ -119,11 +120,12 @@ struct drm_mode_crtc {
 	struct drm_mode_modeinfo mode;
 };
 
-#define DRM_MODE_ENCODER_NONE	0
-#define DRM_MODE_ENCODER_DAC	1
-#define DRM_MODE_ENCODER_TMDS	2
-#define DRM_MODE_ENCODER_LVDS	3
-#define DRM_MODE_ENCODER_TVDAC	4
+#define DRM_MODE_ENCODER_NONE	 0
+#define DRM_MODE_ENCODER_DAC	 1
+#define DRM_MODE_ENCODER_TMDS	 2
+#define DRM_MODE_ENCODER_LVDS	 3
+#define DRM_MODE_ENCODER_TVDAC	 4
+#define DRM_MODE_ENCODER_VIRTUAL 5
 
 struct drm_mode_get_encoder {
 	__u32 encoder_id;
@@ -161,6 +163,7 @@ struct drm_mode_get_encoder {
 #define DRM_MODE_CONNECTOR_HDMIB	12
 #define DRM_MODE_CONNECTOR_TV		13
 #define DRM_MODE_CONNECTOR_eDP		14
+#define DRM_MODE_CONNECTOR_VIRTUAL      15
 
 struct drm_mode_get_connector {
 
@@ -232,6 +235,8 @@ struct drm_mode_fb_cmd {
 #define DRM_MODE_FB_DIRTY_ANNOTATE_FILL 0x02
 #define DRM_MODE_FB_DIRTY_FLAGS         0x03
 
+#define DRM_MODE_FB_DIRTY_MAX_CLIPS     256
+
 /*
  * Mark a region of a framebuffer as dirty.
  *
@@ -276,7 +281,7 @@ struct drm_mode_mode_cmd {
 #define DRM_MODE_CURSOR_MOVE	(1<<1)
 
 /*
- * depending on the value in flags diffrent members are used.
+ * depending on the value in flags different members are used.
  *
  * CURSOR_BO uses
  *    crtc
@@ -341,6 +346,35 @@ struct drm_mode_crtc_page_flip {
 	__u32 flags;
 	__u32 reserved;
 	__u64 user_data;
+};
+
+/* create a dumb scanout buffer */
+struct drm_mode_create_dumb {
+	uint32_t height;
+	uint32_t width;
+	uint32_t bpp;
+	uint32_t flags;
+	/* handle, pitch, size will be returned */
+	uint32_t handle;
+	uint32_t pitch;
+	uint64_t size;
+};
+
+/* set up for mmap of a dumb scanout buffer */
+struct drm_mode_map_dumb {
+	/** Handle for the object being mapped. */
+	__u32 handle;
+	__u32 pad;
+	/**
+	 * Fake offset to use for subsequent mmap call
+	 *
+	 * This is a fixed-size type for 32/64 compatibility.
+	 */
+	__u64 offset;
+};
+
+struct drm_mode_destroy_dumb {
+	uint32_t handle;
 };
 
 #endif

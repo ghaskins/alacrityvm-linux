@@ -100,9 +100,12 @@
 /* Configuration Table */
 #define CFGTBL_ChangeReq        0x00000001l
 #define CFGTBL_AccCmds          0x00000001l
+#define DOORBELL_CTLR_RESET	0x00000004l
+#define DOORBELL_CTLR_RESET2	0x00000020l
 
 #define CFGTBL_Trans_Simple     0x00000002l
 #define CFGTBL_Trans_Performant 0x00000004l
+#define CFGTBL_Trans_use_short_tags 0x20000000l
 
 #define CFGTBL_BusType_Ultra2   0x00000001l
 #define CFGTBL_BusType_Ultra3   0x00000002l
@@ -120,8 +123,11 @@ union u64bit {
 
 /* FIXME this is a per controller value (barf!) */
 #define HPSA_MAX_TARGETS_PER_CTLR 16
-#define HPSA_MAX_LUN 256
+#define HPSA_MAX_LUN 1024
 #define HPSA_MAX_PHYS_LUN 1024
+#define MAX_MSA2XXX_ENCLOSURES 32
+#define HPSA_MAX_DEVICES (HPSA_MAX_PHYS_LUN + HPSA_MAX_LUN + \
+	MAX_MSA2XXX_ENCLOSURES + 1) /* + 1 is for the controller itself */
 
 /* SCSI-3 Commands */
 #pragma pack(1)
@@ -151,21 +157,6 @@ struct SenseSubsystem_info {
 	u8 portname[8];
 	u8 reserved1[1108];
 };
-
-#define HPSA_READ_CAPACITY 0x25 /* Read Capacity */
-struct ReadCapdata {
-	u8 total_size[4];	/* Total size in blocks */
-	u8 block_size[4];	/* Size of blocks in bytes */
-};
-
-#if 0
-/* 12 byte commands not implemented in firmware yet. */
-#define HPSA_READ 	0xa8
-#define HPSA_WRITE	0xaa
-#endif
-
-#define HPSA_READ   0x28    /* Read(10) */
-#define HPSA_WRITE  0x2a    /* Write(10) */
 
 /* BMIC commands */
 #define BMIC_READ 0x26
@@ -269,16 +260,9 @@ struct ErrorInfo {
 #define CMD_IOCTL_PEND  0x01
 #define CMD_SCSI	0x03
 
-/* This structure needs to be divisible by 32 for new
- * indexing method and performant mode.
- */
-#define PAD32 32
-#define PAD64DIFF 0
-#define USEEXTRA ((sizeof(void *) - 4)/4)
-#define PADSIZE (PAD32 + PAD64DIFF * USEEXTRA)
-
 #define DIRECT_LOOKUP_SHIFT 5
 #define DIRECT_LOOKUP_BIT 0x10
+#define DIRECT_LOOKUP_MASK (~((1 << DIRECT_LOOKUP_SHIFT) - 1))
 
 #define HPSA_ERROR_BIT          0x02
 struct ctlr_info; /* defined in hpsa.h */
@@ -305,7 +289,7 @@ struct CommandList {
 	struct ctlr_info	   *h;
 	int			   cmd_type;
 	long			   cmdindex;
-	struct hlist_node list;
+	struct list_head list;
 	struct request *rq;
 	struct completion *waiting;
 	void   *scsi_cmd;
@@ -354,6 +338,11 @@ struct CfgTable {
 	u32		MaxPhysicalDevices;
 	u32		MaxPhysicalDrivesPerLogicalUnit;
 	u32		MaxPerformantModeCommands;
+	u8		reserved[0x78 - 0x58];
+	u32		misc_fw_support; /* offset 0x78 */
+#define			MISC_FW_DOORBELL_RESET (0x02)
+#define			MISC_FW_DOORBELL_RESET2 (0x010)
+	u8		driver_version[32];
 };
 
 #define NUM_BLOCKFETCH_ENTRIES 8

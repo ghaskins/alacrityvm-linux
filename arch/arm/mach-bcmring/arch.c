@@ -29,6 +29,7 @@
 #include <asm/setup.h>
 #include <asm/mach-types.h>
 #include <asm/mach/time.h>
+#include <asm/pmu.h>
 
 #include <asm/mach/arch.h>
 #include <mach/dma.h>
@@ -85,8 +86,23 @@ static struct platform_device nand_device = {
 	.num_resources	= ARRAY_SIZE(nand_resource),
 };
 
+static struct resource pmu_resource = {
+	.start	= IRQ_PMUIRQ,
+	.end	= IRQ_PMUIRQ,
+	.flags	= IORESOURCE_IRQ,
+};
+
+static struct platform_device pmu_device = {
+	.name		= "arm-pmu",
+	.id		= ARM_PMU_DEVICE_CPU,
+	.resource	= &pmu_resource,
+	.num_resources	= 1,
+};
+
+
 static struct platform_device *devices[] __initdata = {
 	&nand_device,
+	&pmu_device,
 };
 
 /****************************************************************************
@@ -120,8 +136,8 @@ static void __init bcmring_init_machine(void)
 *
 *****************************************************************************/
 
-static void __init bcmring_fixup(struct machine_desc *desc,
-     struct tag *t, char **cmdline, struct meminfo *mi) {
+static void __init bcmring_fixup(struct tag *t, char **cmdline,
+	struct meminfo *mi) {
 #ifdef CONFIG_BLK_DEV_INITRD
 	printk(KERN_NOTICE "bcmring_fixup\n");
 	t->hdr.tag = ATAG_CORE;
@@ -151,10 +167,9 @@ static void __init bcmring_fixup(struct machine_desc *desc,
 
 MACHINE_START(BCMRING, "BCMRING")
 	/* Maintainer: Broadcom Corporation */
-	.phys_io = MM_IO_START,
-	.io_pg_offst = (MM_IO_BASE >> 18) & 0xfffc,
 	.fixup = bcmring_fixup,
 	.map_io = bcmring_map_io,
+	.init_early = bcmring_init_early,
 	.init_irq = bcmring_init_irq,
 	.timer = &bcmring_timer,
 	.init_machine = bcmring_init_machine

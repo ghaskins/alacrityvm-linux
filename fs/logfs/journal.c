@@ -132,10 +132,9 @@ static int read_area(struct super_block *sb, struct logfs_je_area *a)
 
 	ofs = dev_ofs(sb, area->a_segno, area->a_written_bytes);
 	if (super->s_writesize > 1)
-		logfs_buf_recover(area, ofs, a + 1, super->s_writesize);
+		return logfs_buf_recover(area, ofs, a + 1, super->s_writesize);
 	else
-		logfs_buf_recover(area, ofs, NULL, 0);
-	return 0;
+		return logfs_buf_recover(area, ofs, NULL, 0);
 }
 
 static void *unpack(void *from, void *to)
@@ -245,7 +244,7 @@ static int read_je(struct super_block *sb, u64 ofs)
 		read_erasecount(sb, unpack(jh, scratch));
 		break;
 	case JE_AREA:
-		read_area(sb, unpack(jh, scratch));
+		err = read_area(sb, unpack(jh, scratch));
 		break;
 	case JE_OBJ_ALIAS:
 		err = logfs_load_object_aliases(sb, unpack(jh, scratch),
@@ -829,7 +828,7 @@ void do_logfs_journal_wl_pass(struct super_block *sb)
 		super->s_journal_seg[i] = segno;
 		super->s_journal_ec[i] = ec;
 		logfs_set_segment_reserved(sb, segno);
-		err = btree_insert32(head, segno, (void *)1, GFP_KERNEL);
+		err = btree_insert32(head, segno, (void *)1, GFP_NOFS);
 		BUG_ON(err); /* mempool should prevent this */
 		err = logfs_erase_segment(sb, segno, 1);
 		BUG_ON(err); /* FIXME: remount-ro would be nicer */
@@ -890,8 +889,6 @@ void logfs_cleanup_journal(struct super_block *sb)
 	struct logfs_super *super = logfs_super(sb);
 
 	btree_grim_visitor32(&super->s_reserved_segments, 0, NULL);
-	destroy_meta_inode(super->s_master_inode);
-	super->s_master_inode = NULL;
 
 	kfree(super->s_compressed_je);
 	kfree(super->s_je);

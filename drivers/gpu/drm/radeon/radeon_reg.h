@@ -55,6 +55,7 @@
 #include "r500_reg.h"
 #include "r600_reg.h"
 #include "evergreen_reg.h"
+#include "ni_reg.h"
 
 #define RADEON_MC_AGP_LOCATION		0x014c
 #define		RADEON_MC_AGP_START_MASK	0x0000FFFF
@@ -299,6 +300,8 @@
 #       define RADEON_BUS_READ_BURST         (1 << 30)
 #define RADEON_BUS_CNTL1                    0x0034
 #       define RADEON_BUS_WAIT_ON_LOCK_EN    (1 << 4)
+#define RV370_BUS_CNTL                      0x004c
+#       define RV370_BUS_BIOS_DIS_ROM        (1 << 2)
 /* rv370/rv380, rv410, r423/r430/r480, r5xx */
 #define RADEON_MSI_REARM_EN		    0x0160
 #	define RV370_MSI_REARM_EN	     (1 << 0)
@@ -320,6 +323,15 @@
 #       define RADEON_PCIE_LC_RECONFIG_NOW         (1 << 8)
 #       define RADEON_PCIE_LC_RECONFIG_LATER       (1 << 9)
 #       define RADEON_PCIE_LC_SHORT_RECONFIG_EN    (1 << 10)
+#       define R600_PCIE_LC_RECONFIG_ARC_MISSING_ESCAPE   (1 << 7)
+#       define R600_PCIE_LC_RENEGOTIATION_SUPPORT  (1 << 9)
+#       define R600_PCIE_LC_RENEGOTIATE_EN         (1 << 10)
+#       define R600_PCIE_LC_SHORT_RECONFIG_EN      (1 << 11)
+#       define R600_PCIE_LC_UPCONFIGURE_SUPPORT    (1 << 12)
+#       define R600_PCIE_LC_UPCONFIGURE_DIS        (1 << 13)
+
+#define R600_TARGET_AND_CURRENT_PROFILE_INDEX      0x70c
+#define R700_TARGET_AND_CURRENT_PROFILE_INDEX      0x66c
 
 #define RADEON_CACHE_CNTL                   0x1724
 #define RADEON_CACHE_LINE                   0x0f0c /* PCI */
@@ -365,6 +377,8 @@
 #define RADEON_CONFIG_APER_SIZE             0x0108
 #define RADEON_CONFIG_BONDS                 0x00e8
 #define RADEON_CONFIG_CNTL                  0x00e0
+#       define RADEON_CFG_VGA_RAM_EN        (1 << 8)
+#       define RADEON_CFG_VGA_IO_DIS        (1 << 9)
 #       define RADEON_CFG_ATI_REV_A11       (0   << 16)
 #       define RADEON_CFG_ATI_REV_A12       (1   << 16)
 #       define RADEON_CFG_ATI_REV_A13       (2   << 16)
@@ -422,6 +436,7 @@
 #       define RADEON_CRTC_CSYNC_EN         (1 <<  4)
 #       define RADEON_CRTC_ICON_EN          (1 << 15)
 #       define RADEON_CRTC_CUR_EN           (1 << 16)
+#       define RADEON_CRTC_VSTAT_MODE_MASK  (3 << 17)
 #       define RADEON_CRTC_CUR_MODE_MASK    (7 << 20)
 #       define RADEON_CRTC_CUR_MODE_SHIFT   20
 #       define RADEON_CRTC_CUR_MODE_MONO    0
@@ -509,6 +524,8 @@
 #       define RADEON_CRTC_TILE_EN                      (1 << 15)
 #       define RADEON_CRTC_OFFSET_FLIP_CNTL             (1 << 16)
 #       define RADEON_CRTC_STEREO_OFFSET_EN             (1 << 17)
+#       define RADEON_CRTC_GUI_TRIG_OFFSET_LEFT_EN      (1 << 28)
+#       define RADEON_CRTC_GUI_TRIG_OFFSET_RIGHT_EN     (1 << 29)
 
 #define R300_CRTC_TILE_X0_Y0	            0x0350
 #define R300_CRTC2_TILE_X0_Y0	            0x0358
@@ -553,7 +570,6 @@
 #       define RADEON_CRTC_CRNT_VLINE_MASK  (0x7ff << 16)
 #define RADEON_CRTC2_CRNT_FRAME             0x0314
 #define RADEON_CRTC2_GUI_TRIG_VLINE         0x0318
-#define RADEON_CRTC2_STATUS                 0x03fc
 #define RADEON_CRTC2_VLINE_CRNT_VLINE       0x0310
 #define RADEON_CRTC8_DATA                   0x03d5 /* VGA, 0x3b5 */
 #define RADEON_CRTC8_IDX                    0x03d4 /* VGA, 0x3b4 */
@@ -995,6 +1011,7 @@
 #	define RADEON_FP_DETECT_MASK		(1 << 4)
 #	define RADEON_CRTC2_VBLANK_MASK		(1 << 9)
 #	define RADEON_FP2_DETECT_MASK		(1 << 10)
+#	define RADEON_GUI_IDLE_MASK		(1 << 19)
 #	define RADEON_SW_INT_ENABLE		(1 << 25)
 #define RADEON_GEN_INT_STATUS               0x0044
 #	define AVIVO_DISPLAY_INT_STATUS		(1 << 0)
@@ -1006,6 +1023,8 @@
 #	define RADEON_CRTC2_VBLANK_STAT_ACK	(1 << 9)
 #	define RADEON_FP2_DETECT_STAT		(1 << 10)
 #	define RADEON_FP2_DETECT_STAT_ACK	(1 << 10)
+#	define RADEON_GUI_IDLE_STAT		(1 << 19)
+#	define RADEON_GUI_IDLE_STAT_ACK		(1 << 19)
 #	define RADEON_SW_INT_FIRE		(1 << 26)
 #	define RADEON_SW_INT_TEST		(1 << 25)
 #	define RADEON_SW_INT_TEST_ACK		(1 << 25)
@@ -2834,6 +2853,7 @@
 #       define R200_TXFORMAT_ST_ROUTE_STQ5	(5 << 24)
 #       define R200_TXFORMAT_ST_ROUTE_MASK	(7 << 24)
 #       define R200_TXFORMAT_ST_ROUTE_SHIFT	24
+#       define R200_TXFORMAT_LOOKUP_DISABLE	(1 << 27)
 #       define R200_TXFORMAT_ALPHA_MASK_ENABLE	(1 << 28)
 #       define R200_TXFORMAT_CHROMA_KEY_ENABLE	(1 << 29)
 #       define R200_TXFORMAT_CUBIC_MAP_ENABLE		(1 << 30)
@@ -3275,7 +3295,7 @@
 #	define RADEON_RB_BUFSZ_MASK		(0x3f << 0)
 #	define RADEON_RB_BLKSZ_SHIFT		8
 #	define RADEON_RB_BLKSZ_MASK		(0x3f << 8)
-#	define RADEON_BUF_SWAP_32BIT		(1 << 17)
+#	define RADEON_BUF_SWAP_32BIT		(2 << 16)
 #	define RADEON_MAX_FETCH_SHIFT		18
 #	define RADEON_MAX_FETCH_MASK		(0x3 << 18)
 #	define RADEON_RB_NO_UPDATE		(1 << 27)

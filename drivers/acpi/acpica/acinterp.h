@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2010, Intel Corp.
+ * Copyright (C) 2000 - 2011, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -119,6 +119,13 @@ acpi_ex_convert_to_target_type(acpi_object_type destination_type,
 			       union acpi_operand_object *source_desc,
 			       union acpi_operand_object **result_desc,
 			       struct acpi_walk_state *walk_state);
+
+/*
+ * exdebug - AML debug object
+ */
+void
+acpi_ex_do_debug_object(union acpi_operand_object *source_desc,
+			u32 level, u32 index);
 
 /*
  * exfield - ACPI AML (p-code) execution - field manipulation
@@ -274,7 +281,7 @@ acpi_status
 acpi_ex_system_do_notify_op(union acpi_operand_object *value,
 			    union acpi_operand_object *obj_desc);
 
-acpi_status acpi_ex_system_do_suspend(u64 time);
+acpi_status acpi_ex_system_do_sleep(u64 time);
 
 acpi_status acpi_ex_system_do_stall(u32 time);
 

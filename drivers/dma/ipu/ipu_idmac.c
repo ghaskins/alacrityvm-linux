@@ -9,6 +9,7 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/dma-mapping.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/err.h>
@@ -20,6 +21,7 @@
 #include <linux/string.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/module.h>
 
 #include <mach/ipu.h>
 
@@ -1145,29 +1147,6 @@ static int ipu_disable_channel(struct idmac *idmac, struct idmac_channel *ichan,
 	reg = idmac_read_icreg(ipu, IDMAC_CHA_EN);
 	idmac_write_icreg(ipu, reg & ~chan_mask, IDMAC_CHA_EN);
 
-	/*
-	 * Problem (observed with channel DMAIC_7): after enabling the channel
-	 * and initialising buffers, there comes an interrupt with current still
-	 * pointing at buffer 0, whereas it should use buffer 0 first and only
-	 * generate an interrupt when it is done, then current should already
-	 * point to buffer 1. This spurious interrupt also comes on channel
-	 * DMASDC_0. With DMAIC_7 normally, is we just leave the ISR after the
-	 * first interrupt, there comes the second with current correctly
-	 * pointing to buffer 1 this time. But sometimes this second interrupt
-	 * doesn't come and the channel hangs. Clearing BUFx_RDY when disabling
-	 * the channel seems to prevent the channel from hanging, but it doesn't
-	 * prevent the spurious interrupt. This might also be unsafe. Think
-	 * about the IDMAC controller trying to switch to a buffer, when we
-	 * clear the ready bit, and re-enable it a moment later.
-	 */
-	reg = idmac_read_ipureg(ipu, IPU_CHA_BUF0_RDY);
-	idmac_write_ipureg(ipu, 0, IPU_CHA_BUF0_RDY);
-	idmac_write_ipureg(ipu, reg & ~(1UL << channel), IPU_CHA_BUF0_RDY);
-
-	reg = idmac_read_ipureg(ipu, IPU_CHA_BUF1_RDY);
-	idmac_write_ipureg(ipu, 0, IPU_CHA_BUF1_RDY);
-	idmac_write_ipureg(ipu, reg & ~(1UL << channel), IPU_CHA_BUF1_RDY);
-
 	spin_unlock_irqrestore(&ipu->lock, flags);
 
 	return 0;
@@ -1246,33 +1225,6 @@ static irqreturn_t idmac_interrupt(int irq, void *dev_id)
 
 	/* Other interrupts do not interfere with this channel */
 	spin_lock(&ichan->lock);
-	if (unlikely(chan_id != IDMAC_SDC_0 && chan_id != IDMAC_SDC_1 &&
-		     ((curbuf >> chan_id) & 1) == ichan->active_buffer &&
-		     !list_is_last(ichan->queue.next, &ichan->queue))) {
-		int i = 100;
-
-		/* This doesn't help. See comment in ipu_disable_channel() */
-		while (--i) {
-			curbuf = idmac_read_ipureg(&ipu_data, IPU_CHA_CUR_BUF);
-			if (((curbuf >> chan_id) & 1) != ichan->active_buffer)
-				break;
-			cpu_relax();
-		}
-
-		if (!i) {
-			spin_unlock(&ichan->lock);
-			dev_dbg(dev,
-				"IRQ on active buffer on channel %x, active "
-				"%d, ready %x, %x, current %x!\n", chan_id,
-				ichan->active_buffer, ready0, ready1, curbuf);
-			return IRQ_NONE;
-		} else
-			dev_dbg(dev,
-				"Buffer deactivated on channel %x, active "
-				"%d, ready %x, %x, current %x, rest %d!\n", chan_id,
-				ichan->active_buffer, ready0, ready1, curbuf, i);
-	}
-
 	if (unlikely((ichan->active_buffer && (ready1 >> chan_id) & 1) ||
 		     (!ichan->active_buffer && (ready0 >> chan_id) & 1)
 		     )) {
@@ -1356,6 +1308,7 @@ static irqreturn_t idmac_interrupt(int irq, void *dev_id)
 	    ipu_submit_buffer(ichan, descnew, sgnew, ichan->active_buffer) < 0) {
 		callback = descnew->txd.callback;
 		callback_param = descnew->txd.callback_param;
+		list_del_init(&descnew->list);
 		spin_unlock(&ichan->lock);
 		if (callback)
 			callback(callback_param);
@@ -1472,50 +1425,80 @@ static void idmac_issue_pending(struct dma_chan *chan)
 	 */
 }
 
-static void __idmac_terminate_all(struct dma_chan *chan)
+static int __idmac_control(struct dma_chan *chan, enum dma_ctrl_cmd cmd,
+			   unsigned long arg)
 {
 	struct idmac_channel *ichan = to_idmac_chan(chan);
 	struct idmac *idmac = to_idmac(chan->device);
+	struct ipu *ipu = to_ipu(idmac);
+	struct list_head *list, *tmp;
 	unsigned long flags;
 	int i;
 
-	ipu_disable_channel(idmac, ichan,
-			    ichan->status >= IPU_CHANNEL_ENABLED);
+	switch (cmd) {
+	case DMA_PAUSE:
+		spin_lock_irqsave(&ipu->lock, flags);
+		ipu_ic_disable_task(ipu, chan->chan_id);
 
-	tasklet_disable(&to_ipu(idmac)->tasklet);
+		/* Return all descriptors into "prepared" state */
+		list_for_each_safe(list, tmp, &ichan->queue)
+			list_del_init(list);
 
-	/* ichan->queue is modified in ISR, have to spinlock */
-	spin_lock_irqsave(&ichan->lock, flags);
-	list_splice_init(&ichan->queue, &ichan->free_list);
+		ichan->sg[0] = NULL;
+		ichan->sg[1] = NULL;
 
-	if (ichan->desc)
-		for (i = 0; i < ichan->n_tx_desc; i++) {
-			struct idmac_tx_desc *desc = ichan->desc + i;
-			if (list_empty(&desc->list))
-				/* Descriptor was prepared, but not submitted */
-				list_add(&desc->list, &ichan->free_list);
+		spin_unlock_irqrestore(&ipu->lock, flags);
 
-			async_tx_clear_ack(&desc->txd);
-		}
+		ichan->status = IPU_CHANNEL_INITIALIZED;
+		break;
+	case DMA_TERMINATE_ALL:
+		ipu_disable_channel(idmac, ichan,
+				    ichan->status >= IPU_CHANNEL_ENABLED);
 
-	ichan->sg[0] = NULL;
-	ichan->sg[1] = NULL;
-	spin_unlock_irqrestore(&ichan->lock, flags);
+		tasklet_disable(&ipu->tasklet);
 
-	tasklet_enable(&to_ipu(idmac)->tasklet);
+		/* ichan->queue is modified in ISR, have to spinlock */
+		spin_lock_irqsave(&ichan->lock, flags);
+		list_splice_init(&ichan->queue, &ichan->free_list);
 
-	ichan->status = IPU_CHANNEL_INITIALIZED;
+		if (ichan->desc)
+			for (i = 0; i < ichan->n_tx_desc; i++) {
+				struct idmac_tx_desc *desc = ichan->desc + i;
+				if (list_empty(&desc->list))
+					/* Descriptor was prepared, but not submitted */
+					list_add(&desc->list, &ichan->free_list);
+
+				async_tx_clear_ack(&desc->txd);
+			}
+
+		ichan->sg[0] = NULL;
+		ichan->sg[1] = NULL;
+		spin_unlock_irqrestore(&ichan->lock, flags);
+
+		tasklet_enable(&ipu->tasklet);
+
+		ichan->status = IPU_CHANNEL_INITIALIZED;
+		break;
+	default:
+		return -ENOSYS;
+	}
+
+	return 0;
 }
 
-static void idmac_terminate_all(struct dma_chan *chan)
+static int idmac_control(struct dma_chan *chan, enum dma_ctrl_cmd cmd,
+			 unsigned long arg)
 {
 	struct idmac_channel *ichan = to_idmac_chan(chan);
+	int ret;
 
 	mutex_lock(&ichan->chan_mutex);
 
-	__idmac_terminate_all(chan);
+	ret = __idmac_control(chan, cmd, arg);
 
 	mutex_unlock(&ichan->chan_mutex);
+
+	return ret;
 }
 
 #ifdef DEBUG
@@ -1607,7 +1590,7 @@ static void idmac_free_chan_resources(struct dma_chan *chan)
 
 	mutex_lock(&ichan->chan_mutex);
 
-	__idmac_terminate_all(chan);
+	__idmac_control(chan, DMA_TERMINATE_ALL, 0);
 
 	if (ichan->status > IPU_CHANNEL_FREE) {
 #ifdef DEBUG
@@ -1637,15 +1620,12 @@ static void idmac_free_chan_resources(struct dma_chan *chan)
 	tasklet_schedule(&to_ipu(idmac)->tasklet);
 }
 
-static enum dma_status idmac_is_tx_complete(struct dma_chan *chan,
-		dma_cookie_t cookie, dma_cookie_t *done, dma_cookie_t *used)
+static enum dma_status idmac_tx_status(struct dma_chan *chan,
+		       dma_cookie_t cookie, struct dma_tx_state *txstate)
 {
 	struct idmac_channel *ichan = to_idmac_chan(chan);
 
-	if (done)
-		*done = ichan->completed;
-	if (used)
-		*used = chan->cookie;
+	dma_set_tx_state(txstate, ichan->completed, chan->cookie, 0);
 	if (cookie != chan->cookie)
 		return DMA_ERROR;
 	return DMA_SUCCESS;
@@ -1664,12 +1644,12 @@ static int __init ipu_idmac_init(struct ipu *ipu)
 	dma->dev				= ipu->dev;
 	dma->device_alloc_chan_resources	= idmac_alloc_chan_resources;
 	dma->device_free_chan_resources		= idmac_free_chan_resources;
-	dma->device_is_tx_complete		= idmac_is_tx_complete;
+	dma->device_tx_status			= idmac_tx_status;
 	dma->device_issue_pending		= idmac_issue_pending;
 
 	/* Compulsory for DMA_SLAVE fields */
 	dma->device_prep_slave_sg		= idmac_prep_slave_sg;
-	dma->device_terminate_all		= idmac_terminate_all;
+	dma->device_control			= idmac_control;
 
 	INIT_LIST_HEAD(&dma->channels);
 	for (i = 0; i < IPU_CHANNELS_NUM; i++) {
@@ -1703,8 +1683,7 @@ static void __exit ipu_idmac_exit(struct ipu *ipu)
 	for (i = 0; i < IPU_CHANNELS_NUM; i++) {
 		struct idmac_channel *ichan = ipu->channel + i;
 
-		idmac_terminate_all(&ichan->dma_chan);
-		idmac_prep_slave_sg(&ichan->dma_chan, NULL, 0, DMA_NONE, 0);
+		idmac_control(&ichan->dma_chan, DMA_TERMINATE_ALL, 0);
 	}
 
 	dma_async_device_unregister(&idmac->dma);
@@ -1747,16 +1726,14 @@ static int __init ipu_probe(struct platform_device *pdev)
 		ipu_data.irq_fn, ipu_data.irq_err, ipu_data.irq_base);
 
 	/* Remap IPU common registers */
-	ipu_data.reg_ipu = ioremap(mem_ipu->start,
-				   mem_ipu->end - mem_ipu->start + 1);
+	ipu_data.reg_ipu = ioremap(mem_ipu->start, resource_size(mem_ipu));
 	if (!ipu_data.reg_ipu) {
 		ret = -ENOMEM;
 		goto err_ioremap_ipu;
 	}
 
 	/* Remap Image Converter and Image DMA Controller registers */
-	ipu_data.reg_ic = ioremap(mem_ic->start,
-				  mem_ic->end - mem_ic->start + 1);
+	ipu_data.reg_ic = ioremap(mem_ic->start, resource_size(mem_ic));
 	if (!ipu_data.reg_ic) {
 		ret = -ENOMEM;
 		goto err_ioremap_ic;

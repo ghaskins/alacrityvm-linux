@@ -17,14 +17,12 @@
 #include <linux/resource.h>
 #include <linux/times.h>
 #include <linux/smp.h>
-#include <linux/smp_lock.h>
 #include <linux/sem.h>
 #include <linux/msg.h>
 #include <linux/shm.h>
 #include <linux/uio.h>
 #include <linux/nfs_fs.h>
 #include <linux/quota.h>
-#include <linux/module.h>
 #include <linux/poll.h>
 #include <linux/personality.h>
 #include <linux/stat.h>
@@ -110,7 +108,7 @@ asmlinkage long compat_sys_ipc(u32 call, u32 first, u32 second, u32 third, compa
 
 	default:
 		return -ENOSYS;
-	};
+	}
 
 	return -ENOSYS;
 }
@@ -162,7 +160,7 @@ static int cp_compat_stat64(struct kstat *stat,
 	return err;
 }
 
-asmlinkage long compat_sys_stat64(char __user * filename,
+asmlinkage long compat_sys_stat64(const char __user * filename,
 		struct compat_stat64 __user *statbuf)
 {
 	struct kstat stat;
@@ -173,7 +171,7 @@ asmlinkage long compat_sys_stat64(char __user * filename,
 	return error;
 }
 
-asmlinkage long compat_sys_lstat64(char __user * filename,
+asmlinkage long compat_sys_lstat64(const char __user * filename,
 		struct compat_stat64 __user *statbuf)
 {
 	struct kstat stat;
@@ -195,7 +193,8 @@ asmlinkage long compat_sys_fstat64(unsigned int fd,
 	return error;
 }
 
-asmlinkage long compat_sys_fstatat64(unsigned int dfd, char __user *filename,
+asmlinkage long compat_sys_fstatat64(unsigned int dfd,
+		const char __user *filename,
 		struct compat_stat64 __user * statbuf, int flag)
 {
 	struct kstat stat;

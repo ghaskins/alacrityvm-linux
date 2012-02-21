@@ -23,7 +23,6 @@
  * caches is sufficient.
  */
 
-#include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
 #include <linux/highmem.h>
@@ -52,14 +51,14 @@ static struct backing_dev_info ramfs_backing_dev_info = {
 			  BDI_CAP_READ_MAP | BDI_CAP_WRITE_MAP | BDI_CAP_EXEC_MAP,
 };
 
-struct inode *ramfs_get_inode(struct super_block *sb, int mode, dev_t dev)
+struct inode *ramfs_get_inode(struct super_block *sb,
+				const struct inode *dir, int mode, dev_t dev)
 {
 	struct inode * inode = new_inode(sb);
 
 	if (inode) {
-		inode->i_mode = mode;
-		inode->i_uid = current_fsuid();
-		inode->i_gid = current_fsgid();
+		inode->i_ino = get_next_ino();
+		inode_init_owner(inode, dir, mode);
 		inode->i_mapping->a_ops = &ramfs_aops;
 		inode->i_mapping->backing_dev_info = &ramfs_backing_dev_info;
 		mapping_set_gfp_mask(inode->i_mapping, GFP_HIGHUSER);
@@ -95,15 +94,10 @@ struct inode *ramfs_get_inode(struct super_block *sb, int mode, dev_t dev)
 static int
 ramfs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
 {
-	struct inode * inode = ramfs_get_inode(dir->i_sb, mode, dev);
+	struct inode * inode = ramfs_get_inode(dir->i_sb, dir, mode, dev);
 	int error = -ENOSPC;
 
 	if (inode) {
-		if (dir->i_mode & S_ISGID) {
-			inode->i_gid = dir->i_gid;
-			if (S_ISDIR(mode))
-				inode->i_mode |= S_ISGID;
-		}
 		d_instantiate(dentry, inode);
 		dget(dentry);	/* Extra count - pin the dentry in core */
 		error = 0;
@@ -130,13 +124,11 @@ static int ramfs_symlink(struct inode * dir, struct dentry *dentry, const char *
 	struct inode *inode;
 	int error = -ENOSPC;
 
-	inode = ramfs_get_inode(dir->i_sb, S_IFLNK|S_IRWXUGO, 0);
+	inode = ramfs_get_inode(dir->i_sb, dir, S_IFLNK|S_IRWXUGO, 0);
 	if (inode) {
 		int l = strlen(symname)+1;
 		error = page_symlink(inode, symname, l);
 		if (!error) {
-			if (dir->i_mode & S_ISGID)
-				inode->i_gid = dir->i_gid;
 			d_instantiate(dentry, inode);
 			dget(dentry);
 			dir->i_mtime = dir->i_ctime = CURRENT_TIME;
@@ -214,7 +206,7 @@ static int ramfs_parse_options(char *data, struct ramfs_mount_opts *opts)
 	return 0;
 }
 
-static int ramfs_fill_super(struct super_block * sb, void * data, int silent)
+int ramfs_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct ramfs_fs_info *fsi;
 	struct inode *inode = NULL;
@@ -241,7 +233,7 @@ static int ramfs_fill_super(struct super_block * sb, void * data, int silent)
 	sb->s_op		= &ramfs_ops;
 	sb->s_time_gran		= 1;
 
-	inode = ramfs_get_inode(sb, S_IFDIR | fsi->mount_opts.mode, 0);
+	inode = ramfs_get_inode(sb, NULL, S_IFDIR | fsi->mount_opts.mode, 0);
 	if (!inode) {
 		err = -ENOMEM;
 		goto fail;
@@ -262,17 +254,16 @@ fail:
 	return err;
 }
 
-int ramfs_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+struct dentry *ramfs_mount(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	return get_sb_nodev(fs_type, flags, data, ramfs_fill_super, mnt);
+	return mount_nodev(fs_type, flags, data, ramfs_fill_super);
 }
 
-static int rootfs_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+static struct dentry *rootfs_mount(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	return get_sb_nodev(fs_type, flags|MS_NOUSER, data, ramfs_fill_super,
-			    mnt);
+	return mount_nodev(fs_type, flags|MS_NOUSER, data, ramfs_fill_super);
 }
 
 static void ramfs_kill_sb(struct super_block *sb)
@@ -283,12 +274,12 @@ static void ramfs_kill_sb(struct super_block *sb)
 
 static struct file_system_type ramfs_fs_type = {
 	.name		= "ramfs",
-	.get_sb		= ramfs_get_sb,
+	.mount		= ramfs_mount,
 	.kill_sb	= ramfs_kill_sb,
 };
 static struct file_system_type rootfs_fs_type = {
 	.name		= "rootfs",
-	.get_sb		= rootfs_get_sb,
+	.mount		= rootfs_mount,
 	.kill_sb	= kill_litter_super,
 };
 
@@ -296,14 +287,7 @@ static int __init init_ramfs_fs(void)
 {
 	return register_filesystem(&ramfs_fs_type);
 }
-
-static void __exit exit_ramfs_fs(void)
-{
-	unregister_filesystem(&ramfs_fs_type);
-}
-
 module_init(init_ramfs_fs)
-module_exit(exit_ramfs_fs)
 
 int __init init_rootfs(void)
 {
@@ -319,5 +303,3 @@ int __init init_rootfs(void)
 
 	return err;
 }
-
-MODULE_LICENSE("GPL");

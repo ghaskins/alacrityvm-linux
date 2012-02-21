@@ -84,7 +84,7 @@ static void jffs2_wbuf_dirties_inode(struct jffs2_sb_info *c, uint32_t ino)
 	struct jffs2_inodirty *new;
 
 	/* Mark the superblock dirty so that kupdated will flush... */
-	jffs2_erase_pending_trigger(c);
+	jffs2_dirty_trigger(c);
 
 	if (jffs2_wbuf_pending_for_ino(c, ino))
 		return;
@@ -121,7 +121,7 @@ static inline void jffs2_refile_wbuf_blocks(struct jffs2_sb_info *c)
 			D1(printk(KERN_DEBUG "...and adding to erase_pending_list\n"));
 			list_add_tail(&jeb->list, &c->erase_pending_list);
 			c->nr_erasing_blocks++;
-			jffs2_erase_pending_trigger(c);
+			jffs2_garbage_collect_trigger(c);
 		} else {
 			/* Sometimes, however, we leave it elsewhere so it doesn't get
 			   immediately reused, and we spread the load a bit. */
@@ -152,7 +152,7 @@ static void jffs2_block_refile(struct jffs2_sb_info *c, struct jffs2_eraseblock 
 		D1(printk("Refiling block at %08x to erase_pending_list\n", jeb->offset));
 		list_add(&jeb->list, &c->erase_pending_list);
 		c->nr_erasing_blocks++;
-		jffs2_erase_pending_trigger(c);
+		jffs2_garbage_collect_trigger(c);
 	}
 
 	if (!jffs2_prealloc_raw_node_refs(c, jeb, 1)) {
@@ -543,7 +543,7 @@ static void jffs2_wbuf_recover(struct jffs2_sb_info *c)
 		D1(printk(KERN_DEBUG "Failing block at %08x is now empty. Moving to erase_pending_list\n", jeb->offset));
 		list_move(&jeb->list, &c->erase_pending_list);
 		c->nr_erasing_blocks++;
-		jffs2_erase_pending_trigger(c);
+		jffs2_garbage_collect_trigger(c);
 	}
 
 	jffs2_dbg_acct_sanity_check_nolock(c, jeb);
@@ -578,8 +578,7 @@ static int __jffs2_flush_wbuf(struct jffs2_sb_info *c, int pad)
 	if (!jffs2_is_writebuffered(c))
 		return 0;
 
-	if (mutex_trylock(&c->alloc_sem)) {
-		mutex_unlock(&c->alloc_sem);
+	if (!mutex_is_locked(&c->alloc_sem)) {
 		printk(KERN_CRIT "jffs2_flush_wbuf() called with alloc_sem not locked!\n");
 		BUG();
 	}
@@ -1026,7 +1025,7 @@ int jffs2_check_oob_empty(struct jffs2_sb_info *c,
 	int cmlen = min_t(int, c->oobavail, OOB_CM_SIZE);
 	struct mtd_oob_ops ops;
 
-	ops.mode = MTD_OOB_AUTO;
+	ops.mode = MTD_OPS_AUTO_OOB;
 	ops.ooblen = NR_OOB_SCAN_PAGES * c->oobavail;
 	ops.oobbuf = c->oobbuf;
 	ops.len = ops.ooboffs = ops.retlen = ops.oobretlen = 0;
@@ -1069,7 +1068,7 @@ int jffs2_check_nand_cleanmarker(struct jffs2_sb_info *c,
 	struct mtd_oob_ops ops;
 	int ret, cmlen = min_t(int, c->oobavail, OOB_CM_SIZE);
 
-	ops.mode = MTD_OOB_AUTO;
+	ops.mode = MTD_OPS_AUTO_OOB;
 	ops.ooblen = cmlen;
 	ops.oobbuf = c->oobbuf;
 	ops.len = ops.ooboffs = ops.retlen = ops.oobretlen = 0;
@@ -1095,7 +1094,7 @@ int jffs2_write_nand_cleanmarker(struct jffs2_sb_info *c,
 	struct mtd_oob_ops ops;
 	int cmlen = min_t(int, c->oobavail, OOB_CM_SIZE);
 
-	ops.mode = MTD_OOB_AUTO;
+	ops.mode = MTD_OPS_AUTO_OOB;
 	ops.ooblen = cmlen;
 	ops.oobbuf = (uint8_t *)&oob_cleanmarker;
 	ops.len = ops.ooboffs = ops.retlen = ops.oobretlen = 0;
@@ -1116,7 +1115,7 @@ int jffs2_write_nand_cleanmarker(struct jffs2_sb_info *c,
 
 /*
  * On NAND we try to mark this block bad. If the block was erased more
- * than MAX_ERASE_FAILURES we mark it finaly bad.
+ * than MAX_ERASE_FAILURES we mark it finally bad.
  * Don't care about failures. This block remains on the erase-pending
  * or badblock list as long as nobody manipulates the flash with
  * a bootloader or something like that.

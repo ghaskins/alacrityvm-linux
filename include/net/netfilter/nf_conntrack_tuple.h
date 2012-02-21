@@ -12,6 +12,7 @@
 
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter/nf_conntrack_tuple_common.h>
+#include <linux/netfilter_ipv4/nf_nat.h>
 #include <linux/list_nulls.h>
 
 /* A `tuple' is a structure containing the information to uniquely
@@ -23,32 +24,6 @@
 */
 
 #define NF_CT_TUPLE_L3SIZE	ARRAY_SIZE(((union nf_inet_addr *)NULL)->all)
-
-/* The protocol-specific manipulable parts of the tuple: always in
-   network order! */
-union nf_conntrack_man_proto {
-	/* Add other protocols here. */
-	__be16 all;
-
-	struct {
-		__be16 port;
-	} tcp;
-	struct {
-		__be16 port;
-	} udp;
-	struct {
-		__be16 id;
-	} icmp;
-	struct {
-		__be16 port;
-	} dccp;
-	struct {
-		__be16 port;
-	} sctp;
-	struct {
-		__be16 key;	/* GRE key is 32bit, PPtP only uses 16bit */
-	} gre;
-};
 
 /* The manipulable part of the tuple. */
 struct nf_conntrack_man {
@@ -104,8 +79,6 @@ struct nf_conntrack_tuple_mask {
 	} src;
 };
 
-#ifdef __KERNEL__
-
 static inline void nf_ct_dump_tuple_ip(const struct nf_conntrack_tuple *t)
 {
 #ifdef DEBUG
@@ -147,8 +120,6 @@ struct nf_conntrack_tuple_hash {
 	struct hlist_nulls_node hnnode;
 	struct nf_conntrack_tuple tuple;
 };
-
-#endif /* __KERNEL__ */
 
 static inline bool __nf_ct_tuple_src_equal(const struct nf_conntrack_tuple *t1,
 					   const struct nf_conntrack_tuple *t2)

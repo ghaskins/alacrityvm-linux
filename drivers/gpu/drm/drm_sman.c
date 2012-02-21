@@ -36,6 +36,7 @@
  * Thomas Hellström <thomas-at-tungstengraphics-dot-com>
  */
 
+#include <linux/export.h>
 #include "drm_sman.h"
 
 struct drm_owner_item {
@@ -59,9 +60,7 @@ drm_sman_init(struct drm_sman * sman, unsigned int num_managers,
 {
 	int ret = 0;
 
-	sman->mm = (struct drm_sman_mm *) kcalloc(num_managers,
-						  sizeof(*sman->mm),
-						  GFP_KERNEL);
+	sman->mm = kcalloc(num_managers, sizeof(*sman->mm), GFP_KERNEL);
 	if (!sman->mm) {
 		ret = -ENOMEM;
 		goto out;

@@ -111,7 +111,8 @@ struct compat_statfs {
 	int		f_bavail;
 	compat_fsid_t	f_fsid;
 	int		f_namelen;
-	int		f_spare[6];
+	int		f_flags;
+	int		f_spare[5];
 };
 
 #define COMPAT_RLIM_INFINITY	0x7fffffffUL
@@ -145,7 +146,7 @@ static inline compat_uptr_t ptr_to_compat(void __user *uptr)
 	return (u32)(unsigned long)uptr;
 }
 
-static inline void __user *compat_alloc_user_space(long len)
+static inline void __user *arch_compat_alloc_user_space(long len)
 {
 	struct pt_regs *regs = (struct pt_regs *)
 		((unsigned long) current_thread_info() + THREAD_SIZE - 32) - 1;

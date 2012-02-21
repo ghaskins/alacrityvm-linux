@@ -16,37 +16,34 @@
 #include <linux/suspend.h>
 #include <linux/serial_core.h>
 #include <linux/io.h>
+#include <linux/gpio.h>
 
 #include <mach/map.h>
+#include <mach/irqs.h>
 
 #include <plat/pm.h>
+#include <plat/wakeup-mask.h>
+
 #include <mach/regs-sys.h>
 #include <mach/regs-gpio.h>
 #include <mach/regs-clock.h>
 #include <mach/regs-syscon-power.h>
 #include <mach/regs-gpio-memport.h>
+#include <mach/regs-modem.h>
 
 #ifdef CONFIG_S3C_PM_DEBUG_LED_SMDK
-#include <mach/gpio-bank-n.h>
-
 void s3c_pm_debug_smdkled(u32 set, u32 clear)
 {
 	unsigned long flags;
-	u32 reg;
+	int i;
 
 	local_irq_save(flags);
-	reg = __raw_readl(S3C64XX_GPNCON);
-	reg &= ~(S3C64XX_GPN_CONMASK(12) | S3C64XX_GPN_CONMASK(13) |
-		 S3C64XX_GPN_CONMASK(14) | S3C64XX_GPN_CONMASK(15));
-	reg |= S3C64XX_GPN_OUTPUT(12) | S3C64XX_GPN_OUTPUT(13) |
-	       S3C64XX_GPN_OUTPUT(14) | S3C64XX_GPN_OUTPUT(15);
-	__raw_writel(reg, S3C64XX_GPNCON);
-
-	reg = __raw_readl(S3C64XX_GPNDAT);
-	reg &= ~(clear << 12);
-	reg |= set << 12;
-	__raw_writel(reg, S3C64XX_GPNDAT);
-
+	for (i = 0; i < 4; i++) {
+		if (clear & (1 << i))
+			gpio_set_value(S3C64XX_GPN(12 + i), 0);
+		if (set & (1 << i))
+			gpio_set_value(S3C64XX_GPN(12 + i), 1);
+	}
 	local_irq_restore(flags);
 }
 #endif
@@ -89,6 +86,9 @@ static struct sleep_save misc_save[] = {
 	SAVE_ITEM(S3C64XX_MEM0CONSLP0),
 	SAVE_ITEM(S3C64XX_MEM0CONSLP1),
 	SAVE_ITEM(S3C64XX_MEM1CONSLP),
+
+	SAVE_ITEM(S3C64XX_SDMA_SEL),
+	SAVE_ITEM(S3C64XX_MODEM_MIFPCON),
 };
 
 void s3c_pm_configure_extint(void)
@@ -117,7 +117,7 @@ void s3c_pm_save_core(void)
  * this.
  */
 
-static void s3c64xx_cpu_suspend(void)
+static int s3c64xx_cpu_suspend(unsigned long arg)
 {
 	unsigned long tmp;
 
@@ -153,8 +153,25 @@ static void s3c64xx_cpu_suspend(void)
 	panic("sleep resumed to originator?");
 }
 
+/* mapping of interrupts to parts of the wakeup mask */
+static struct samsung_wakeup_mask wake_irqs[] = {
+	{ .irq = IRQ_RTC_ALARM,	.bit = S3C64XX_PWRCFG_RTC_ALARM_DISABLE, },
+	{ .irq = IRQ_RTC_TIC,	.bit = S3C64XX_PWRCFG_RTC_TICK_DISABLE, },
+	{ .irq = IRQ_PENDN,	.bit = S3C64XX_PWRCFG_TS_DISABLE, },
+	{ .irq = IRQ_HSMMC0,	.bit = S3C64XX_PWRCFG_MMC0_DISABLE, },
+	{ .irq = IRQ_HSMMC1,	.bit = S3C64XX_PWRCFG_MMC1_DISABLE, },
+	{ .irq = IRQ_HSMMC2,	.bit = S3C64XX_PWRCFG_MMC2_DISABLE, },
+	{ .irq = NO_WAKEUP_IRQ,	.bit = S3C64XX_PWRCFG_BATF_DISABLE},
+	{ .irq = NO_WAKEUP_IRQ,	.bit = S3C64XX_PWRCFG_MSM_DISABLE },
+	{ .irq = NO_WAKEUP_IRQ,	.bit = S3C64XX_PWRCFG_HSI_DISABLE },
+	{ .irq = NO_WAKEUP_IRQ,	.bit = S3C64XX_PWRCFG_MSM_DISABLE },
+};
+
 static void s3c64xx_pm_prepare(void)
 {
+	samsung_sync_wakemask(S3C64XX_PWR_CFG,
+			      wake_irqs, ARRAY_SIZE(wake_irqs));
+
 	/* store address of resume. */
 	__raw_writel(virt_to_phys(s3c_cpu_resume), S3C64XX_INFORM0);
 
@@ -167,6 +184,18 @@ static int s3c64xx_pm_init(void)
 	pm_cpu_prep = s3c64xx_pm_prepare;
 	pm_cpu_sleep = s3c64xx_cpu_suspend;
 	pm_uart_udivslot = 1;
+
+#ifdef CONFIG_S3C_PM_DEBUG_LED_SMDK
+	gpio_request(S3C64XX_GPN(12), "DEBUG_LED0");
+	gpio_request(S3C64XX_GPN(13), "DEBUG_LED1");
+	gpio_request(S3C64XX_GPN(14), "DEBUG_LED2");
+	gpio_request(S3C64XX_GPN(15), "DEBUG_LED3");
+	gpio_direction_output(S3C64XX_GPN(12), 0);
+	gpio_direction_output(S3C64XX_GPN(13), 0);
+	gpio_direction_output(S3C64XX_GPN(14), 0);
+	gpio_direction_output(S3C64XX_GPN(15), 0);
+#endif
+
 	return 0;
 }
 

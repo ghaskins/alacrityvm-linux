@@ -7,6 +7,7 @@
 #include <linux/pci.h>
 #include <linux/gfp.h>
 #include <linux/bootmem.h>
+#include <linux/export.h>
 #include <linux/scatterlist.h>
 #include <linux/log2.h>
 #include <linux/dma-mapping.h>
@@ -223,7 +224,7 @@ iommu_arena_free(struct pci_iommu_arena *arena, long ofs, long n)
  */
 static int pci_dac_dma_supported(struct pci_dev *dev, u64 mask)
 {
-	dma64_addr_t dac_offset = alpha_mv.pci_dac_offset;
+	dma_addr_t dac_offset = alpha_mv.pci_dac_offset;
 	int ok = 1;
 
 	/* If this is not set, the machine doesn't support DAC at all.  */
@@ -756,7 +757,7 @@ static void alpha_pci_unmap_sg(struct device *dev, struct scatterlist *sg,
 	spin_lock_irqsave(&arena->lock, flags);
 
 	for (end = sg + nents; sg < end; ++sg) {
-		dma64_addr_t addr;
+		dma_addr_t addr;
 		size_t size;
 		long npages, ofs;
 		dma_addr_t tend;

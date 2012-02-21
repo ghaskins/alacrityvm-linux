@@ -40,7 +40,7 @@
 #include "clock.h"
 #include "clock2xxx.h"
 #include "opp2xxx.h"
-#include "cm.h"
+#include "cm2xxx_3xxx.h"
 #include "cm-regbits-24xx.h"
 
 const struct prcm_config *curr_prcm_set;
@@ -68,16 +68,13 @@ long omap2_round_to_table_rate(struct clk *clk, unsigned long rate)
 {
 	const struct prcm_config *ptr;
 	long highest_rate;
-	long sys_ck_rate;
-
-	sys_ck_rate = clk_get_rate(sclk);
 
 	highest_rate = -EINVAL;
 
 	for (ptr = rate_table; ptr->mpu_speed; ptr++) {
 		if (!(ptr->flags & cpu_mask))
 			continue;
-		if (ptr->xtal_speed != sys_ck_rate)
+		if (ptr->xtal_speed != sclk->rate)
 			continue;
 
 		highest_rate = ptr->mpu_speed;
@@ -96,15 +93,12 @@ int omap2_select_table_rate(struct clk *clk, unsigned long rate)
 	const struct prcm_config *prcm;
 	unsigned long found_speed = 0;
 	unsigned long flags;
-	long sys_ck_rate;
-
-	sys_ck_rate = clk_get_rate(sclk);
 
 	for (prcm = rate_table; prcm->mpu_speed; prcm++) {
 		if (!(prcm->flags & cpu_mask))
 			continue;
 
-		if (prcm->xtal_speed != sys_ck_rate)
+		if (prcm->xtal_speed != sclk->rate)
 			continue;
 
 		if (prcm->mpu_speed <= rate) {
@@ -139,21 +133,21 @@ int omap2_select_table_rate(struct clk *clk, unsigned long rate)
 			done_rate = CORE_CLK_SRC_DPLL;
 
 		/* MPU divider */
-		cm_write_mod_reg(prcm->cm_clksel_mpu, MPU_MOD, CM_CLKSEL);
+		omap2_cm_write_mod_reg(prcm->cm_clksel_mpu, MPU_MOD, CM_CLKSEL);
 
 		/* dsp + iva1 div(2420), iva2.1(2430) */
-		cm_write_mod_reg(prcm->cm_clksel_dsp,
+		omap2_cm_write_mod_reg(prcm->cm_clksel_dsp,
 				 OMAP24XX_DSP_MOD, CM_CLKSEL);
 
-		cm_write_mod_reg(prcm->cm_clksel_gfx, GFX_MOD, CM_CLKSEL);
+		omap2_cm_write_mod_reg(prcm->cm_clksel_gfx, GFX_MOD, CM_CLKSEL);
 
 		/* Major subsystem dividers */
-		tmp = cm_read_mod_reg(CORE_MOD, CM_CLKSEL1) & OMAP24XX_CLKSEL_DSS2_MASK;
-		cm_write_mod_reg(prcm->cm_clksel1_core | tmp, CORE_MOD,
+		tmp = omap2_cm_read_mod_reg(CORE_MOD, CM_CLKSEL1) & OMAP24XX_CLKSEL_DSS2_MASK;
+		omap2_cm_write_mod_reg(prcm->cm_clksel1_core | tmp, CORE_MOD,
 				 CM_CLKSEL1);
 
 		if (cpu_is_omap2430())
-			cm_write_mod_reg(prcm->cm_clksel_mdm,
+			omap2_cm_write_mod_reg(prcm->cm_clksel_mdm,
 					 OMAP2430_MDM_MOD, CM_CLKSEL);
 
 		/* x2 to enter omap2xxx_sdrc_init_params() */
@@ -181,19 +175,16 @@ static struct cpufreq_frequency_table *freq_table;
 void omap2_clk_init_cpufreq_table(struct cpufreq_frequency_table **table)
 {
 	const struct prcm_config *prcm;
-	long sys_ck_rate;
 	int i = 0;
 	int tbl_sz = 0;
 
 	if (!cpu_is_omap24xx())
 		return;
 
-	sys_ck_rate = clk_get_rate(sclk);
-
 	for (prcm = rate_table; prcm->mpu_speed; prcm++) {
 		if (!(prcm->flags & cpu_mask))
 			continue;
-		if (prcm->xtal_speed != sys_ck_rate)
+		if (prcm->xtal_speed != sclk->rate)
 			continue;
 
 		/* don't put bypass rates in table */
@@ -226,7 +217,7 @@ void omap2_clk_init_cpufreq_table(struct cpufreq_frequency_table **table)
 	for (prcm = rate_table; prcm->mpu_speed; prcm++) {
 		if (!(prcm->flags & cpu_mask))
 			continue;
-		if (prcm->xtal_speed != sys_ck_rate)
+		if (prcm->xtal_speed != sclk->rate)
 			continue;
 
 		/* don't put bypass rates in table */

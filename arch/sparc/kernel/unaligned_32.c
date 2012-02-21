@@ -10,13 +10,11 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
-#include <linux/module.h>
 #include <asm/ptrace.h>
 #include <asm/processor.h>
 #include <asm/system.h>
 #include <asm/uaccess.h>
 #include <linux/smp.h>
-#include <linux/smp_lock.h>
 #include <linux/perf_event.h>
 
 enum direction {
@@ -248,7 +246,7 @@ asmlinkage void kernel_unaligned_trap(struct pt_regs *regs, unsigned int insn)
 		unsigned long addr = compute_effective_address(regs, insn);
 		int err;
 
-		perf_sw_event(PERF_COUNT_SW_ALIGNMENT_FAULTS, 1, 0, regs, addr);
+		perf_sw_event(PERF_COUNT_SW_ALIGNMENT_FAULTS, 1, regs, addr);
 		switch (dir) {
 		case load:
 			err = do_int_load(fetch_reg_addr(((insn>>25)&0x1f),
@@ -323,7 +321,6 @@ asmlinkage void user_unaligned_trap(struct pt_regs *regs, unsigned int insn)
 {
 	enum direction dir;
 
-	lock_kernel();
 	if(!(current->thread.flags & SPARC_FLAG_UNALIGNED) ||
 	   (((insn >> 30) & 3) != 3))
 		goto kill_user;
@@ -340,7 +337,7 @@ asmlinkage void user_unaligned_trap(struct pt_regs *regs, unsigned int insn)
 		}
 
 		addr = compute_effective_address(regs, insn);
-		perf_sw_event(PERF_COUNT_SW_ALIGNMENT_FAULTS, 1, 0, regs, addr);
+		perf_sw_event(PERF_COUNT_SW_ALIGNMENT_FAULTS, 1, regs, addr);
 		switch(dir) {
 		case load:
 			err = do_int_load(fetch_reg_addr(((insn>>25)&0x1f),
@@ -377,5 +374,5 @@ asmlinkage void user_unaligned_trap(struct pt_regs *regs, unsigned int insn)
 kill_user:
 	user_mna_trap_fault(regs, insn);
 out:
-	unlock_kernel();
+	;
 }

@@ -12,6 +12,7 @@
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/stat.h>
 #include <linux/pci.h>
 
 #include <asm/prom.h>
@@ -24,7 +25,7 @@
 #define MV64X60_VAL_LEN_MAX		11
 #define MV64X60_PCICFG_CPCI_HOTSWAP	0x68
 
-static ssize_t mv64x60_hs_reg_read(struct kobject *kobj,
+static ssize_t mv64x60_hs_reg_read(struct file *filp, struct kobject *kobj,
 				   struct bin_attribute *attr, char *buf,
 				   loff_t off, size_t count)
 {
@@ -45,7 +46,7 @@ static ssize_t mv64x60_hs_reg_read(struct kobject *kobj,
 	return sprintf(buf, "0x%08x\n", v);
 }
 
-static ssize_t mv64x60_hs_reg_write(struct kobject *kobj,
+static ssize_t mv64x60_hs_reg_write(struct file *filp, struct kobject *kobj,
 				    struct bin_attribute *attr, char *buf,
 				    loff_t off, size_t count)
 {
@@ -73,7 +74,6 @@ static struct bin_attribute mv64x60_hs_reg_attr = { /* Hotswap register */
 	.attr = {
 		.name = "hs_reg",
 		.mode = S_IRUGO | S_IWUSR,
-		.owner = THIS_MODULE,
 	},
 	.size  = MV64X60_VAL_LEN_MAX,
 	.read  = mv64x60_hs_reg_read,

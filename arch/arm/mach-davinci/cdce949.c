@@ -17,8 +17,10 @@
 #include <linux/clk.h>
 #include <linux/platform_device.h>
 #include <linux/i2c.h>
+#include <linux/module.h>
 
 #include <mach/clock.h>
+#include <mach/cdce949.h>
 
 #include "clock.h"
 

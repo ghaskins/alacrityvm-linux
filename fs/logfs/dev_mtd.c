@@ -9,6 +9,7 @@
 #include <linux/completion.h>
 #include <linux/mount.h>
 #include <linux/sched.h>
+#include <linux/slab.h>
 
 #define PAGE_OFS(ofs) ((ofs) & (PAGE_SIZE-1))
 
@@ -59,7 +60,7 @@ static int mtd_write(struct super_block *sb, loff_t ofs, size_t len, void *buf)
  * asynchronous properties.  So just to prevent the first implementor of such
  * a thing from breaking logfs in 2350, we do the usual pointless dance to
  * declare a completion variable and wait for completion before returning
- * from mtd_erase().  What an excercise in futility!
+ * from mtd_erase().  What an exercise in futility!
  */
 static void logfs_erase_callback(struct erase_info *ei)
 {
@@ -126,7 +127,8 @@ static int mtd_readpage(void *_sb, struct page *page)
 
 	err = mtd_read(sb, page->index << PAGE_SHIFT, PAGE_SIZE,
 			page_address(page));
-	if (err == -EUCLEAN) {
+	if (err == -EUCLEAN || err == -EBADMSG) {
+		/* -EBADMSG happens regularly on power failures */
 		err = 0;
 		/* FIXME: force GC this segment */
 	}
@@ -228,9 +230,28 @@ static void mtd_writeseg(struct super_block *sb, u64 ofs, size_t len)
 	__mtd_writeseg(sb, ofs, ofs >> PAGE_SHIFT, len >> PAGE_SHIFT);
 }
 
-static void mtd_put_device(struct super_block *sb)
+static void mtd_put_device(struct logfs_super *s)
 {
-	put_mtd_device(logfs_super(sb)->s_mtd);
+	put_mtd_device(s->s_mtd);
+}
+
+static int mtd_can_write_buf(struct super_block *sb, u64 ofs)
+{
+	struct logfs_super *super = logfs_super(sb);
+	void *buf;
+	int err;
+
+	buf = kmalloc(super->s_writesize, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+	err = mtd_read(sb, ofs, super->s_writesize, buf);
+	if (err)
+		goto out;
+	if (memchr_inv(buf, 0xff, super->s_writesize))
+		err = -EIO;
+	kfree(buf);
+out:
+	return err;
 }
 
 static const struct logfs_device_ops mtd_devops = {
@@ -239,16 +260,19 @@ static const struct logfs_device_ops mtd_devops = {
 	.readpage	= mtd_readpage,
 	.writeseg	= mtd_writeseg,
 	.erase		= mtd_erase,
+	.can_write_buf	= mtd_can_write_buf,
 	.sync		= mtd_sync,
 	.put_device	= mtd_put_device,
 };
 
-int logfs_get_sb_mtd(struct file_system_type *type, int flags,
-		int mtdnr, struct vfsmount *mnt)
+int logfs_get_sb_mtd(struct logfs_super *s, int mtdnr)
 {
-	struct mtd_info *mtd;
-	const struct logfs_device_ops *devops = &mtd_devops;
+	struct mtd_info *mtd = get_mtd_device(NULL, mtdnr);
+	if (IS_ERR(mtd))
+		return PTR_ERR(mtd);
 
-	mtd = get_mtd_device(NULL, mtdnr);
-	return logfs_get_sb_device(type, flags, mtd, NULL, devops, mnt);
+	s->s_bdev = NULL;
+	s->s_mtd = mtd;
+	s->s_devops = &mtd_devops;
+	return 0;
 }

@@ -1,7 +1,8 @@
 /*
  * vbus_enet - A virtualized 802.x network device based on the VBUS interface
  *
- * Copyright (C) 2009 Novell, Gregory Haskins <ghaskins@novell.com>
+ * Copyright (C) 2009 Novell, Gregory Haskins
+ * Copyright (C) 2012 Gregory Haskins <gregory.haskins@gmail.com>
  *
  * Derived from the SNULL example from the book "Linux Device Drivers" by
  * Alessandro Rubini, Jonathan Corbet, and Greg Kroah-Hartman, published
@@ -630,7 +631,7 @@ vbus_enet_l4ro_import(struct vbus_enet_priv *priv, struct ioq_ring_desc *desc)
 		struct page *page = (struct page *)(unsigned long)iov->ptr;
 		skb_frag_t *f = &sinfo->frags[i-1];
 
-		f->page        = page;
+		f->page.p      = page;
 		f->page_offset = 0;
 		f->size        = iov->len;
 
@@ -1557,7 +1558,7 @@ static struct vbus_driver vbus_enet_driver = {
 static __init int
 vbus_enet_init_module(void)
 {
-	printk(KERN_INFO "Virtual Ethernet: Copyright (C) 2009 Novell, Gregory Haskins\n");
+	printk(KERN_INFO "Virtual Ethernet: Copyright (C) 2009 Novell, 2009-2012 Gregory Haskins\n");
 	printk(KERN_DEBUG "VENET: Using %d/%d queue depth\n",
 	       rx_ringlen, tx_ringlen);
 	return vbus_driver_register(&vbus_enet_driver);

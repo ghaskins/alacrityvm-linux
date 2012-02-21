@@ -12,11 +12,13 @@
 #include "pd-common.h"
 #include "vendorcmds.h"
 
+#ifdef CONFIG_PM
 static int pm_video_suspend(struct poseidon *pd);
 static int pm_video_resume(struct poseidon *pd);
+#endif
 static void iso_bubble_handler(struct work_struct *w);
 
-int usb_transfer_mode;
+static int usb_transfer_mode;
 module_param(usb_transfer_mode, int, 0644);
 MODULE_PARM_DESC(usb_transfer_mode, "0 = Bulk, 1 = Isochronous");
 
@@ -476,10 +478,10 @@ static int prepare_iso_urb(struct video_data *video)
 			goto out;
 
 		video->urb_array[i] = urb;
-		mem = usb_buffer_alloc(udev,
-					ISO_PKT_SIZE * PK_PER_URB,
-					GFP_KERNEL,
-					&urb->transfer_dma);
+		mem = usb_alloc_coherent(udev,
+					 ISO_PKT_SIZE * PK_PER_URB,
+					 GFP_KERNEL,
+					 &urb->transfer_dma);
 
 		urb->complete	= urb_complete_iso;	/* handler */
 		urb->dev	= udev;
@@ -510,19 +512,20 @@ int alloc_bulk_urbs_generic(struct urb **urb_array, int num,
 			int buf_size, gfp_t gfp_flags,
 			usb_complete_t complete_fn, void *context)
 {
-	struct urb *urb;
-	void *mem;
-	int i;
+	int i = 0;
 
-	for (i = 0; i < num; i++) {
-		urb = usb_alloc_urb(0, gfp_flags);
+	for (; i < num; i++) {
+		void *mem;
+		struct urb *urb = usb_alloc_urb(0, gfp_flags);
 		if (urb == NULL)
 			return i;
 
-		mem = usb_buffer_alloc(udev, buf_size, gfp_flags,
-					&urb->transfer_dma);
-		if (mem == NULL)
+		mem = usb_alloc_coherent(udev, buf_size, gfp_flags,
+					 &urb->transfer_dma);
+		if (mem == NULL) {
+			usb_free_urb(urb);
 			return i;
+		}
 
 		usb_fill_bulk_urb(urb, udev, usb_rcvbulkpipe(udev, ep_addr),
 				mem, buf_size, complete_fn, context);
@@ -540,7 +543,7 @@ void free_all_urb_generic(struct urb **urb_array, int num)
 	for (i = 0; i < num; i++) {
 		urb = urb_array[i];
 		if (urb) {
-			usb_buffer_free(urb->dev,
+			usb_free_coherent(urb->dev,
 					urb->transfer_buffer_length,
 					urb->transfer_buffer,
 					urb->transfer_dma);
@@ -617,7 +620,7 @@ static int pd_buf_prepare(struct videobuf_queue *q, struct videobuf_buffer *vb,
 	return 0;
 }
 
-int fire_all_urb(struct video_data *video)
+static int fire_all_urb(struct video_data *video)
 {
 	int i, ret;
 
@@ -761,10 +764,8 @@ static int pd_vidioc_s_fmt(struct poseidon *pd, struct v4l2_pix_format *pix)
 	}
 	ret |= send_set_req(pd, VIDEO_ROSOLU_SEL,
 				vid_resol, &cmd_status);
-	if (ret || cmd_status) {
-		mutex_unlock(&pd->lock);
+	if (ret || cmd_status)
 		return -EBUSY;
-	}
 
 	pix_def->pixelformat = pix->pixelformat; /* save it */
 	pix->height = (context->tvnormid & V4L2_STD_525_60) ?  480 : 576;
@@ -877,7 +878,7 @@ out:
 	return ret;
 }
 
-int vidioc_s_std(struct file *file, void *fh, v4l2_std_id *norm)
+static int vidioc_s_std(struct file *file, void *fh, v4l2_std_id *norm)
 {
 	struct front_face *front = fh;
 	logs(front);
@@ -1020,7 +1021,7 @@ static int vidioc_enumaudio(struct file *file, void *fh, struct v4l2_audio *a)
 	return 0;
 }
 
-int vidioc_g_audio(struct file *file, void *fh, struct v4l2_audio *a)
+static int vidioc_g_audio(struct file *file, void *fh, struct v4l2_audio *a)
 {
 	a->index = 0;
 	a->capability = V4L2_AUDCAP_STEREO;
@@ -1029,7 +1030,7 @@ int vidioc_g_audio(struct file *file, void *fh, struct v4l2_audio *a)
 	return 0;
 }
 
-int vidioc_s_audio(struct file *file, void *fh, struct v4l2_audio *a)
+static int vidioc_s_audio(struct file *file, void *fh, struct v4l2_audio *a)
 {
 	return (0 == a->index) ? 0 : -EINVAL;
 }
@@ -1189,7 +1190,7 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *b)
 }
 
 /* Just stop the URBs, do not free the URBs */
-int usb_transfer_stop(struct video_data *video)
+static int usb_transfer_stop(struct video_data *video)
 {
 	if (video->is_streaming) {
 		int i;
@@ -1432,7 +1433,7 @@ static int pd_video_open(struct file *file)
 				V4L2_BUF_TYPE_VIDEO_CAPTURE,
 				V4L2_FIELD_INTERLACED,/* video is interlacd */
 				sizeof(struct videobuf_buffer),/*it's enough*/
-				front);
+				front, NULL);
 	} else if (vfd->vfl_type == VFL_TYPE_VBI
 		&& !(pd->state & POSEIDON_STATE_VBI)) {
 		front = kzalloc(sizeof(struct front_face), GFP_KERNEL);
@@ -1449,7 +1450,7 @@ static int pd_video_open(struct file *file)
 				V4L2_BUF_TYPE_VBI_CAPTURE,
 				V4L2_FIELD_NONE, /* vbi is NONE mode */
 				sizeof(struct videobuf_buffer),
-				front);
+				front, NULL);
 	} else {
 		/* maybe add FM support here */
 		log("other ");
@@ -1518,13 +1519,13 @@ static int pd_video_mmap(struct file *file, struct vm_area_struct *vma)
 	return  videobuf_mmap_mapper(&front->q, vma);
 }
 
-unsigned int pd_video_poll(struct file *file, poll_table *table)
+static unsigned int pd_video_poll(struct file *file, poll_table *table)
 {
 	struct front_face *front = file->private_data;
 	return videobuf_poll_stream(file, &front->q, table);
 }
 
-ssize_t pd_video_read(struct file *file, char __user *buffer,
+static ssize_t pd_video_read(struct file *file, char __user *buffer,
 			size_t count, loff_t *ppos)
 {
 	struct front_face *front = file->private_data;

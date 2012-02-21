@@ -95,7 +95,7 @@ static inline struct thread_info *current_thread_info(void)
 
 #endif
 
-extern struct thread_info *alloc_thread_info(struct task_struct *tsk);
+extern struct thread_info *alloc_thread_info_node(struct task_struct *tsk, int node);
 extern void free_thread_info(struct thread_info *ti);
 extern void arch_task_cache_init(void);
 #define arch_task_cache_init arch_task_cache_init
@@ -121,7 +121,7 @@ extern void init_thread_xstate(void);
 #define TIF_NOTIFY_RESUME	7	/* callback before returning to user */
 #define TIF_SYSCALL_TRACEPOINT	8	/* for ftrace syscall instrumentation */
 #define TIF_POLLING_NRFLAG	17	/* true if poll_idle() is polling TIF_NEED_RESCHED */
-#define TIF_MEMDIE		18
+#define TIF_MEMDIE		18	/* is terminating due to OOM killer */
 #define TIF_FREEZE		19	/* Freezing for suspend */
 
 #define _TIF_SYSCALL_TRACE	(1 << TIF_SYSCALL_TRACE)

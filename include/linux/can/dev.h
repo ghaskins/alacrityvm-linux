@@ -8,12 +8,12 @@
  *
  * Copyright (C) 2008 Wolfgang Grandegger <wg@grandegger.com>
  *
- * Send feedback to <socketcan-users@lists.berlios.de>
  */
 
 #ifndef CAN_DEV_H
 #define CAN_DEV_H
 
+#include <linux/can.h>
 #include <linux/can/netlink.h>
 #include <linux/can/error.h>
 

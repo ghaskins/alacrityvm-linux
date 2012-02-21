@@ -25,6 +25,7 @@
 #include <linux/freezer.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 
 struct virtio_balloon
 {
@@ -39,9 +40,6 @@ struct virtio_balloon
 
 	/* Waiting for host to ack the pages we released. */
 	struct completion acked;
-
-	/* Do we have to tell Host *before* we reuse pages? */
-	bool tell_host_first;
 
 	/* The pages we've told the Host we're not using. */
 	unsigned int num_pages;
@@ -75,7 +73,7 @@ static void balloon_ack(struct virtqueue *vq)
 	struct virtio_balloon *vb;
 	unsigned int len;
 
-	vb = vq->vq_ops->get_buf(vq, &len);
+	vb = virtqueue_get_buf(vq, &len);
 	if (vb)
 		complete(&vb->acked);
 }
@@ -89,9 +87,9 @@ static void tell_host(struct virtio_balloon *vb, struct virtqueue *vq)
 	init_completion(&vb->acked);
 
 	/* We should always be able to add one buffer to an empty queue. */
-	if (vq->vq_ops->add_buf(vq, &sg, 1, 0, vb) < 0)
+	if (virtqueue_add_buf(vq, &sg, 1, 0, vb) < 0)
 		BUG();
-	vq->vq_ops->kick(vq);
+	virtqueue_kick(vq);
 
 	/* When host has read buffer, this completes via balloon_ack */
 	wait_for_completion(&vb->acked);
@@ -151,13 +149,14 @@ static void leak_balloon(struct virtio_balloon *vb, size_t num)
 		vb->num_pages--;
 	}
 
-	if (vb->tell_host_first) {
-		tell_host(vb, vb->deflate_vq);
-		release_pages_by_pfn(vb->pfns, vb->num_pfns);
-	} else {
-		release_pages_by_pfn(vb->pfns, vb->num_pfns);
-		tell_host(vb, vb->deflate_vq);
-	}
+
+	/*
+	 * Note that if
+	 * virtio_has_feature(vdev, VIRTIO_BALLOON_F_MUST_TELL_HOST);
+	 * is true, we *have* to do it in this order
+	 */
+	tell_host(vb, vb->deflate_vq);
+	release_pages_by_pfn(vb->pfns, vb->num_pfns);
 }
 
 static inline void update_stat(struct virtio_balloon *vb, int idx,
@@ -204,7 +203,7 @@ static void stats_request(struct virtqueue *vq)
 	struct virtio_balloon *vb;
 	unsigned int len;
 
-	vb = vq->vq_ops->get_buf(vq, &len);
+	vb = virtqueue_get_buf(vq, &len);
 	if (!vb)
 		return;
 	vb->need_stats_update = 1;
@@ -221,9 +220,9 @@ static void stats_handle_request(struct virtio_balloon *vb)
 
 	vq = vb->stats_vq;
 	sg_init_one(&sg, vb->stats, sizeof(vb->stats));
-	if (vq->vq_ops->add_buf(vq, &sg, 1, 0, vb) < 0)
+	if (virtqueue_add_buf(vq, &sg, 1, 0, vb) < 0)
 		BUG();
-	vq->vq_ops->kick(vq);
+	virtqueue_kick(vq);
 }
 
 static void virtballoon_changed(struct virtio_device *vdev)
@@ -314,10 +313,9 @@ static int virtballoon_probe(struct virtio_device *vdev)
 		 * use it to signal us later.
 		 */
 		sg_init_one(&sg, vb->stats, sizeof vb->stats);
-		if (vb->stats_vq->vq_ops->add_buf(vb->stats_vq,
-						  &sg, 1, 0, vb) < 0)
+		if (virtqueue_add_buf(vb->stats_vq, &sg, 1, 0, vb) < 0)
 			BUG();
-		vb->stats_vq->vq_ops->kick(vb->stats_vq);
+		virtqueue_kick(vb->stats_vq);
 	}
 
 	vb->thread = kthread_run(balloon, vb, "vballoon");
@@ -325,9 +323,6 @@ static int virtballoon_probe(struct virtio_device *vdev)
 		err = PTR_ERR(vb->thread);
 		goto out_del_vqs;
 	}
-
-	vb->tell_host_first
-		= virtio_has_feature(vdev, VIRTIO_BALLOON_F_MUST_TELL_HOST);
 
 	return 0;
 

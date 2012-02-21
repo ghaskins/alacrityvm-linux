@@ -13,13 +13,12 @@
 #ifndef __ASM_ARCH_DMA_H
 #define __ASM_ARCH_DMA_H __FILE__
 
-#include <plat/dma.h>
 #include <linux/sysdev.h>
 
 #define MAX_DMA_TRANSFER_SIZE   0x100000 /* Data Unit is half word  */
 
 /* We use `virtual` dma channels to hide the fact we have only a limited
- * number of DMA channels, and not of all of them (dependant on the device)
+ * number of DMA channels, and not of all of them (dependent on the device)
  * can be attached to any DMA source. We therefore let the DMA core handle
  * the allocation of hardware channels to clients.
 */
@@ -51,10 +50,22 @@ enum dma_ch {
 	DMACH_MAX,		/* the end entry */
 };
 
+static inline bool samsung_dma_has_circular(void)
+{
+	return false;
+}
+
+static inline bool samsung_dma_is_dmadev(void)
+{
+	return false;
+}
+
+#include <plat/dma.h>
+
 #define DMACH_LOW_LEVEL	(1<<28)	/* use this to specifiy hardware ch no */
 
 /* we have 4 dma channels */
-#ifndef CONFIG_CPU_S3C2443
+#if !defined(CONFIG_CPU_S3C2443) && !defined(CONFIG_CPU_S3C2416)
 #define S3C_DMA_CHANNELS		(4)
 #else
 #define S3C_DMA_CHANNELS		(6)
@@ -163,7 +174,7 @@ struct s3c2410_dma_chan {
 	struct s3c2410_dma_client *client;
 
 	/* channel configuration */
-	enum s3c2410_dmasrc	 source;
+	enum dma_data_direction	 source;
 	enum dma_ch		 req_ch;
 	unsigned long		 dev_addr;
 	unsigned long		 load_timeout;
@@ -195,10 +206,5 @@ struct s3c2410_dma_chan {
 };
 
 typedef unsigned long dma_device_t;
-
-static inline bool s3c_dma_has_circular(void)
-{
-	return false;
-}
 
 #endif /* __ASM_ARCH_DMA_H */

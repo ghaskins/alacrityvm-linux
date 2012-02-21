@@ -17,6 +17,7 @@
 
 #include <linux/spi/spi.h>
 #include <linux/spi/lms283gf05.h>
+#include <linux/module.h>
 
 struct lms283gf05_state {
 	struct spi_device	*spi;
@@ -129,7 +130,7 @@ static int lms283gf05_power_set(struct lcd_device *ld, int power)
 	struct spi_device *spi = st->spi;
 	struct lms283gf05_pdata *pdata = spi->dev.platform_data;
 
-	if (power) {
+	if (power <= FB_BLANK_NORMAL) {
 		if (pdata)
 			lms283gf05_reset(pdata->reset_gpio,
 					pdata->reset_inverted);

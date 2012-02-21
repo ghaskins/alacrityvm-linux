@@ -75,6 +75,10 @@
 /* MUSB ULPI VBUSCONTROL */
 #define MUSB_ULPI_USE_EXTVBUS	0x01
 #define MUSB_ULPI_USE_EXTVBUSIND 0x02
+/* ULPI_REG_CONTROL */
+#define MUSB_ULPI_REG_REQ	(1 << 0)
+#define MUSB_ULPI_REG_CMPLT	(1 << 1)
+#define MUSB_ULPI_RDN_WR	(1 << 2)
 
 /* TESTMODE */
 #define MUSB_TEST_FORCE_HOST	0x80
@@ -230,7 +234,8 @@
 #define MUSB_TESTMODE		0x0F	/* 8 bit */
 
 /* Get offset for a given FIFO from musb->mregs */
-#ifdef	CONFIG_USB_TUSB6010
+#if defined(CONFIG_USB_MUSB_TUSB6010) ||	\
+	defined(CONFIG_USB_MUSB_TUSB6010_MODULE)
 #define MUSB_FIFO_OFFSET(epnum)	(0x200 + ((epnum) * 0x20))
 #else
 #define MUSB_FIFO_OFFSET(epnum)	(0x20 + ((epnum) * 4))
@@ -251,6 +256,12 @@
 /* REVISIT: vctrl/vstatus: optional vendor utmi+phy register at 0x68 */
 #define MUSB_HWVERS		0x6C	/* 8 bit */
 #define MUSB_ULPI_BUSCONTROL	0x70	/* 8 bit */
+#define MUSB_ULPI_INT_MASK	0x72	/* 8 bit */
+#define MUSB_ULPI_INT_SRC	0x73	/* 8 bit */
+#define MUSB_ULPI_REG_DATA	0x74	/* 8 bit */
+#define MUSB_ULPI_REG_ADDR	0x75	/* 8 bit */
+#define MUSB_ULPI_REG_CONTROL	0x76	/* 8 bit */
+#define MUSB_ULPI_RAW_DATA	0x77	/* 8 bit */
 
 #define MUSB_EPINFO		0x78	/* 8 bit */
 #define MUSB_RAMINFO		0x79	/* 8 bit */
@@ -285,7 +296,8 @@
 #define MUSB_FLAT_OFFSET(_epnum, _offset)	\
 	(0x100 + (0x10*(_epnum)) + (_offset))
 
-#ifdef CONFIG_USB_TUSB6010
+#if defined(CONFIG_USB_MUSB_TUSB6010) ||	\
+	defined(CONFIG_USB_MUSB_TUSB6010_MODULE)
 /* TUSB6010 EP0 configuration register is special */
 #define MUSB_TUSB_OFFSET(_epnum, _offset)	\
 	(0x10 + _offset)
@@ -623,8 +635,9 @@ static inline u8  musb_read_txhubaddr(void __iomem *mbase, u8 epnum)
 	return 0;
 }
 
-static inline void  musb_read_txhubport(void __iomem *mbase, u8 epnum)
+static inline u8 musb_read_txhubport(void __iomem *mbase, u8 epnum)
 {
+	return 0;
 }
 
 #endif /* CONFIG_BLACKFIN */

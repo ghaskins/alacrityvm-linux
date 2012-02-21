@@ -55,6 +55,7 @@
 #include <linux/mmc/sdio_func.h>
 #include "i2400m-sdio.h"
 #include <linux/wimax/i2400m.h>
+#include <linux/module.h>
 
 #define D_SUBMODULE main
 #include "sdio-debug-levels.h"
@@ -483,6 +484,13 @@ int i2400ms_probe(struct sdio_func *func,
 	sdio_set_drvdata(func, i2400ms);
 
 	i2400m->bus_tx_block_size = I2400MS_BLK_SIZE;
+	/*
+	 * Room required in the TX queue for SDIO message to accommodate
+	 * a smallest payload while allocating header space is 224 bytes,
+	 * which is the smallest message size(the block size 256 bytes)
+	 * minus the smallest message header size(32 bytes).
+	 */
+	i2400m->bus_tx_room_min = I2400MS_BLK_SIZE - I2400M_PL_ALIGN * 2;
 	i2400m->bus_pl_size_max = I2400MS_PL_SIZE_MAX;
 	i2400m->bus_setup = i2400ms_bus_setup;
 	i2400m->bus_dev_start = i2400ms_bus_dev_start;
@@ -583,7 +591,6 @@ module_init(i2400ms_driver_init);
 static
 void __exit i2400ms_driver_exit(void)
 {
-	flush_scheduled_work();	/* for the stuff we schedule */
 	sdio_unregister_driver(&i2400m_sdio_driver);
 }
 module_exit(i2400ms_driver_exit);

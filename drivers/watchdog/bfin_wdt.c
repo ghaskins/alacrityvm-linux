@@ -23,6 +23,7 @@
 #include <linux/interrupt.h>
 #include <linux/uaccess.h>
 #include <asm/blackfin.h>
+#include <asm/bfin_watchdog.h>
 
 #define stamp(fmt, args...) \
 	pr_debug("%s:%i: " fmt "\n", __func__, __LINE__, ## args)
@@ -49,24 +50,6 @@
 # define bfin_write_WDOG_STAT(x) bfin_write_WDOGA_STAT(x)
 #endif
 
-/* Bit in SWRST that indicates boot caused by watchdog */
-#define SWRST_RESET_WDOG 0x4000
-
-/* Bit in WDOG_CTL that indicates watchdog has expired (WDR0) */
-#define WDOG_EXPIRED 0x8000
-
-/* Masks for WDEV field in WDOG_CTL register */
-#define ICTL_RESET   0x0
-#define ICTL_NMI     0x2
-#define ICTL_GPI     0x4
-#define ICTL_NONE    0x6
-#define ICTL_MASK    0x6
-
-/* Masks for WDEN field in WDOG_CTL register */
-#define WDEN_MASK    0x0FF0
-#define WDEN_ENABLE  0x0000
-#define WDEN_DISABLE 0x0AD0
-
 /* some defaults */
 #define WATCHDOG_TIMEOUT 20
 
@@ -80,7 +63,7 @@ static DEFINE_SPINLOCK(bfin_wdt_spinlock);
 /**
  *	bfin_wdt_keepalive - Keep the Userspace Watchdog Alive
  *
- * 	The Userspace watchdog got a KeepAlive: schedule the next timeout.
+ *	The Userspace watchdog got a KeepAlive: schedule the next timeout.
  */
 static int bfin_wdt_keepalive(void)
 {
@@ -354,7 +337,7 @@ static int bfin_wdt_resume(struct platform_device *pdev)
 static const struct file_operations bfin_wdt_fops = {
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
-	.write    	= bfin_wdt_write,
+	.write		= bfin_wdt_write,
 	.unlocked_ioctl	= bfin_wdt_ioctl,
 	.open		= bfin_wdt_open,
 	.release	= bfin_wdt_release,

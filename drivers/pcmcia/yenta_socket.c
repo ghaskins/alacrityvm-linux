@@ -19,9 +19,7 @@
 #include <linux/io.h>
 #include <linux/slab.h>
 
-#include <pcmcia/cs_types.h>
 #include <pcmcia/ss.h>
-#include <pcmcia/cs.h>
 
 #include "yenta_socket.h"
 #include "i82365.h"
@@ -880,6 +878,12 @@ static struct cardbus_type cardbus_type[] = {
 		.restore_state	= ti_restore_state,
 		.sock_init	= ti_init,
 	},
+	[CARDBUS_TYPE_ENE]	= {
+		.override	= ene_override,
+		.save_state	= ti_save_state,
+		.restore_state	= ti_restore_state,
+		.sock_init	= ti_init,
+	},
 #endif
 #ifdef CONFIG_YENTA_RICOH
 	[CARDBUS_TYPE_RICOH]	= {
@@ -900,14 +904,6 @@ static struct cardbus_type cardbus_type[] = {
 	[CARDBUS_TYPE_O2MICRO]	= {
 		.override	= o2micro_override,
 		.restore_state	= o2micro_restore_state,
-	},
-#endif
-#ifdef CONFIG_YENTA_TI
-	[CARDBUS_TYPE_ENE]	= {
-		.override	= ene_override,
-		.save_state	= ti_save_state,
-		.restore_state	= ti_restore_state,
-		.sock_init	= ti_init,
 	},
 #endif
 };
@@ -1076,7 +1072,7 @@ static void yenta_config_init(struct yenta_socket *socket)
  * invisible during PCI scans because of a misconfigured subordinate number
  * of the parent brige - some BIOSes seem to be too lazy to set it right.
  * Does the fixup carefully by checking how far it can go without conflicts.
- * See http\://bugzilla.kernel.org/show_bug.cgi?id=2944 for more information.
+ * See http://bugzilla.kernel.org/show_bug.cgi?id=2944 for more information.
  */
 static void yenta_fixup_parent_bridge(struct pci_bus *cardbus_bridge)
 {
@@ -1303,13 +1299,6 @@ static int yenta_dev_suspend_noirq(struct device *dev)
 	pci_read_config_dword(pdev, 16*4, &socket->saved_state[0]);
 	pci_read_config_dword(pdev, 17*4, &socket->saved_state[1]);
 	pci_disable_device(pdev);
-
-	/*
-	 * Some laptops (IBM T22) do not like us putting the Cardbus
-	 * bridge into D3.  At a guess, some other laptop will
-	 * probably require this, so leave it commented out for now.
-	 */
-	/* pci_set_power_state(dev, 3); */
 
 	return 0;
 }

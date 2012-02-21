@@ -14,6 +14,7 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/err.h>
+#include <linux/module.h>
 #include <linux/gpio.h>
 #include <linux/regulator/bq24022.h>
 #include <linux/regulator/driver.h>
@@ -78,6 +79,7 @@ static struct regulator_desc bq24022_desc = {
 	.name  = "bq24022",
 	.ops   = &bq24022_ops,
 	.type  = REGULATOR_CURRENT,
+	.owner = THIS_MODULE,
 };
 
 static int __init bq24022_probe(struct platform_device *pdev)

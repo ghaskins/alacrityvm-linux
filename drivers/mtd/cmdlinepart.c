@@ -1,7 +1,22 @@
 /*
  * Read flash partition table from command line
  *
- * Copyright 2002 SYSGO Real-Time Solutions GmbH
+ * Copyright © 2002      SYSGO Real-Time Solutions GmbH
+ * Copyright © 2002-2010 David Woodhouse <dwmw2@infradead.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  * The format for the command line is as follows:
  *
@@ -28,6 +43,7 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
 #include <linux/bootmem.h>
+#include <linux/module.h>
 
 /* error message prefix */
 #define ERRP "mtd: "
@@ -173,10 +189,7 @@ static struct mtd_partition * newpart(char *s,
 			     extra_mem_size;
 		parts = kzalloc(alloc_size, GFP_KERNEL);
 		if (!parts)
-		{
-			printk(KERN_ERR ERRP "out of memory\n");
 			return NULL;
-		}
 		extra_mem = (unsigned char *)(parts + *num_parts);
 	}
 	/* enter this partition (offset will be calculated later if it is zero at this point) */
@@ -301,8 +314,8 @@ static int mtdpart_setup_real(char *s)
  * the first one in the chain if a NULL mtd_id is passed in.
  */
 static int parse_cmdline_partitions(struct mtd_info *master,
-                             struct mtd_partition **pparts,
-                             unsigned long origin)
+				    struct mtd_partition **pparts,
+				    struct mtd_part_parser_data *data)
 {
 	unsigned long offset;
 	int i;

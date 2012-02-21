@@ -25,6 +25,7 @@
  */
 
 #include <linux/types.h>
+#include <linux/gpio.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -43,15 +44,14 @@
 #include <asm/mach/irq.h>
 
 #include <mach/board.h>
-#include <mach/gpio.h>
 
 #include "generic.h"
 
 
-static void __init afeb9260_map_io(void)
+static void __init afeb9260_init_early(void)
 {
 	/* Initialize processor: 18.432 MHz crystal */
-	at91sam9260_initialize(18432000);
+	at91_initialize(18432000);
 
 	/* DBGU on ttyS0. (Rx & Tx only) */
 	at91_register_uart(0, 0, 0);
@@ -69,12 +69,6 @@ static void __init afeb9260_map_io(void)
 	/* set serial console to ttyS0 (ie, DBGU) */
 	at91_set_serial_console(0);
 }
-
-static void __init afeb9260_init_irq(void)
-{
-	at91sam9260_init_interrupts(NULL);
-}
-
 
 /*
  * USB Host port
@@ -136,19 +130,14 @@ static struct mtd_partition __initdata afeb9260_nand_partition[] = {
 	},
 };
 
-static struct mtd_partition * __init nand_partitions(int size, int *num_partitions)
-{
-	*num_partitions = ARRAY_SIZE(afeb9260_nand_partition);
-	return afeb9260_nand_partition;
-}
-
 static struct atmel_nand_data __initdata afeb9260_nand_data = {
 	.ale		= 21,
 	.cle		= 22,
 	.rdy_pin	= AT91_PIN_PC13,
 	.enable_pin	= AT91_PIN_PC14,
-	.partition_info	= nand_partitions,
 	.bus_width_16	= 0,
+	.parts		= afeb9260_nand_partition,
+	.num_parts	= ARRAY_SIZE(afeb9260_nand_partition),
 };
 
 
@@ -218,12 +207,10 @@ static void __init afeb9260_board_init(void)
 
 MACHINE_START(AFEB9260, "Custom afeb9260 board")
 	/* Maintainer: Sergey Lapin <slapin@ossfans.org> */
-	.phys_io	= AT91_BASE_SYS,
-	.io_pg_offst	= (AT91_VA_BASE_SYS >> 18) & 0xfffc,
-	.boot_params	= AT91_SDRAM_BASE + 0x100,
 	.timer		= &at91sam926x_timer,
-	.map_io		= afeb9260_map_io,
-	.init_irq	= afeb9260_init_irq,
+	.map_io		= at91_map_io,
+	.init_early	= afeb9260_init_early,
+	.init_irq	= at91_init_irq_default,
 	.init_machine	= afeb9260_board_init,
 MACHINE_END
 

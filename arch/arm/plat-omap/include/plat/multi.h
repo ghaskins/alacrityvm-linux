@@ -61,12 +61,12 @@
 #  define OMAP_NAME omap16xx
 # endif
 #endif
-#if (defined(CONFIG_ARCH_OMAP2) || defined(CONFIG_ARCH_OMAP3))
+#ifdef CONFIG_ARCH_OMAP2PLUS
 # if (defined(OMAP_NAME) || defined(MULTI_OMAP1))
-#  error "OMAP1 and OMAP2 can't be selected at the same time"
+#  error "OMAP1 and OMAP2PLUS can't be selected at the same time"
 # endif
 #endif
-#ifdef CONFIG_ARCH_OMAP2420
+#ifdef CONFIG_SOC_OMAP2420
 # ifdef OMAP_NAME
 #  undef  MULTI_OMAP2
 #  define MULTI_OMAP2
@@ -74,7 +74,7 @@
 #  define OMAP_NAME omap2420
 # endif
 #endif
-#ifdef CONFIG_ARCH_OMAP2430
+#ifdef CONFIG_SOC_OMAP2430
 # ifdef OMAP_NAME
 #  undef  MULTI_OMAP2
 #  define MULTI_OMAP2
@@ -82,12 +82,20 @@
 #  define OMAP_NAME omap2430
 # endif
 #endif
-#ifdef CONFIG_ARCH_OMAP3430
+#ifdef CONFIG_ARCH_OMAP3
 # ifdef OMAP_NAME
 #  undef  MULTI_OMAP2
 #  define MULTI_OMAP2
 # else
-#  define OMAP_NAME omap3430
+#  define OMAP_NAME omap3
+# endif
+#endif
+#ifdef CONFIG_ARCH_OMAP4
+# ifdef OMAP_NAME
+#  undef  MULTI_OMAP2
+#  define MULTI_OMAP2
+# else
+#  define OMAP_NAME omap4
 # endif
 #endif
 

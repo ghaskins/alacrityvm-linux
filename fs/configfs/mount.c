@@ -101,19 +101,20 @@ static int configfs_fill_super(struct super_block *sb, void *data, int silent)
 	configfs_root_group.cg_item.ci_dentry = root;
 	root->d_fsdata = &configfs_root;
 	sb->s_root = root;
+	sb->s_d_op = &configfs_dentry_ops; /* the rest get that */
 	return 0;
 }
 
-static int configfs_get_sb(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
+static struct dentry *configfs_do_mount(struct file_system_type *fs_type,
+	int flags, const char *dev_name, void *data)
 {
-	return get_sb_single(fs_type, flags, data, configfs_fill_super, mnt);
+	return mount_single(fs_type, flags, data, configfs_fill_super);
 }
 
 static struct file_system_type configfs_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "configfs",
-	.get_sb		= configfs_get_sb,
+	.mount		= configfs_do_mount,
 	.kill_sb	= kill_litter_super,
 };
 
@@ -142,28 +143,26 @@ static int __init configfs_init(void)
 		goto out;
 
 	config_kobj = kobject_create_and_add("config", kernel_kobj);
-	if (!config_kobj) {
-		kmem_cache_destroy(configfs_dir_cachep);
-		configfs_dir_cachep = NULL;
-		goto out;
-	}
-
-	err = register_filesystem(&configfs_fs_type);
-	if (err) {
-		printk(KERN_ERR "configfs: Unable to register filesystem!\n");
-		kobject_put(config_kobj);
-		kmem_cache_destroy(configfs_dir_cachep);
-		configfs_dir_cachep = NULL;
-		goto out;
-	}
+	if (!config_kobj)
+		goto out2;
 
 	err = configfs_inode_init();
-	if (err) {
-		unregister_filesystem(&configfs_fs_type);
-		kobject_put(config_kobj);
-		kmem_cache_destroy(configfs_dir_cachep);
-		configfs_dir_cachep = NULL;
-	}
+	if (err)
+		goto out3;
+
+	err = register_filesystem(&configfs_fs_type);
+	if (err)
+		goto out4;
+
+	return 0;
+out4:
+	printk(KERN_ERR "configfs: Unable to register filesystem!\n");
+	configfs_inode_exit();
+out3:
+	kobject_put(config_kobj);
+out2:
+	kmem_cache_destroy(configfs_dir_cachep);
+	configfs_dir_cachep = NULL;
 out:
 	return err;
 }

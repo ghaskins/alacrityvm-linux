@@ -316,7 +316,6 @@ static int __devinit adt7411_probe(struct i2c_client *client,
  exit_remove:
 	sysfs_remove_group(&client->dev.kobj, &adt7411_attr_grp);
  exit_free:
-	i2c_set_clientdata(client, NULL);
 	kfree(data);
 	return ret;
 }
@@ -327,7 +326,6 @@ static int __devexit adt7411_remove(struct i2c_client *client)
 
 	hwmon_device_unregister(data->hwmon_dev);
 	sysfs_remove_group(&client->dev.kobj, &adt7411_attr_grp);
-	i2c_set_clientdata(client, NULL);
 	kfree(data);
 	return 0;
 }
@@ -336,6 +334,7 @@ static const struct i2c_device_id adt7411_id[] = {
 	{ "adt7411", 0 },
 	{ }
 };
+MODULE_DEVICE_TABLE(i2c, adt7411_id);
 
 static struct i2c_driver adt7411_driver = {
 	.driver		= {

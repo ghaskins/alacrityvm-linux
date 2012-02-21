@@ -25,10 +25,6 @@
 struct rbtx4939_flash_info {
 	struct mtd_info *mtd;
 	struct map_info map;
-#ifdef CONFIG_MTD_PARTITIONS
-	int nr_parts;
-	struct mtd_partition *parts;
-#endif
 };
 
 static int rbtx4939_flash_remove(struct platform_device *dev)
@@ -41,28 +37,15 @@ static int rbtx4939_flash_remove(struct platform_device *dev)
 	platform_set_drvdata(dev, NULL);
 
 	if (info->mtd) {
-#ifdef CONFIG_MTD_PARTITIONS
 		struct rbtx4939_flash_data *pdata = dev->dev.platform_data;
 
-		if (info->nr_parts) {
-			del_mtd_partitions(info->mtd);
-			kfree(info->parts);
-		} else if (pdata->nr_parts)
-			del_mtd_partitions(info->mtd);
-		else
-			del_mtd_device(info->mtd);
-#else
-		del_mtd_device(info->mtd);
-#endif
+		mtd_device_unregister(info->mtd);
 		map_destroy(info->mtd);
 	}
 	return 0;
 }
 
 static const char *rom_probe_types[] = { "cfi_probe", "jedec_probe", NULL };
-#ifdef CONFIG_MTD_PARTITIONS
-static const char *part_probe_types[] = { "cmdlinepart", NULL };
-#endif
 
 static int rbtx4939_flash_probe(struct platform_device *dev)
 {
@@ -119,24 +102,11 @@ static int rbtx4939_flash_probe(struct platform_device *dev)
 	info->mtd->owner = THIS_MODULE;
 	if (err)
 		goto err_out;
+	err = mtd_device_parse_register(info->mtd, NULL, 0,
+			pdata->parts, pdata->nr_parts);
 
-#ifdef CONFIG_MTD_PARTITIONS
-	err = parse_mtd_partitions(info->mtd, part_probe_types,
-				&info->parts, 0);
-	if (err > 0) {
-		add_mtd_partitions(info->mtd, info->parts, err);
-		info->nr_parts = err;
-		return 0;
-	}
-
-	if (pdata->nr_parts) {
-		pr_notice("Using rbtx4939 partition information\n");
-		add_mtd_partitions(info->mtd, pdata->parts, pdata->nr_parts);
-		return 0;
-	}
-#endif
-
-	add_mtd_device(info->mtd);
+	if (err)
+		goto err_out;
 	return 0;
 
 err_out:

@@ -67,28 +67,15 @@
 /*******************************************************************************
  *  include files
  ******************************************************************************/
-#include <linux/version.h>
 #ifdef BUS_PCMCIA
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,27)
-#include <pcmcia/version.h>
-#endif
-#include <pcmcia/cs_types.h>
-#include <pcmcia/cs.h>
 #include <pcmcia/cistpl.h>
 #include <pcmcia/cisreg.h>
 #include <pcmcia/ciscode.h>
 #include <pcmcia/ds.h>
 #endif  // BUS_PCMCIA
 
-#ifdef HAS_WIRELESS_EXTENSIONS
 #include <linux/wireless.h>
-#if WIRELESS_EXT > 13
 #include <net/iw_handler.h>
-#endif // WIRELESS_EXT > 13
-#define USE_DBM
-#define RETURN_CURRENT_NETWORKNAME
-#define USE_FREQUENCY
-#endif // HAS_WIRELESS_EXTENSIONS/
 
 #include <linux/list.h>
 
@@ -866,7 +853,6 @@ struct wl_private
 {
 
 #ifdef BUS_PCMCIA
-	dev_node_t                  node;
 	struct pcmcia_device	    *link;
 #endif // BUS_PCMCIA
 
@@ -897,7 +883,7 @@ struct wl_private
 	int                         is_registered;
 	int                         is_handling_int;
 	int                         firmware_present;
-	char                        sysfsCreated;
+	bool                        sysfsCreated;
 	CFG_DRV_INFO_STRCT          driverInfo;
 	CFG_IDENTITY_STRCT          driverIdentity;
 	CFG_FW_IDENTITY_STRCT       StationIdentity;
@@ -994,16 +980,15 @@ struct wl_private
 #ifdef USE_WDS
 	WVLAN_WDS_IF                wds_port[NUM_WDS_PORTS];
 #endif // USE_WDS
+
+	/* Track whether the card is using WEP encryption or WPA
+	 * so we know what to disable next time through.
+	 *  IW_ENCODE_ALG_NONE, IW_ENCODE_ALG_WEP, IW_ENCODE_ALG_TKIP
+	 */
+	int wext_enc;
 }; // wl_private
 
-#ifdef HAVE_NETDEV_PRIV
 #define wl_priv(dev) ((struct wl_private *) netdev_priv(dev))
-#else
-extern inline struct wl_private *wl_priv(struct net_device *dev)
-{
-    return dev->priv;
-}
-#endif
 
 /********************************************************************/
 /* Locking and synchronization functions                            */
@@ -1013,13 +998,13 @@ extern inline struct wl_private *wl_priv(struct net_device *dev)
  * SPARC, due to its weird semantics for save/restore flags. extern
  * inline should prevent the kernel from linking or module from
  * loading if they are not inlined. */
-extern inline void wl_lock(struct wl_private *lp,
+static inline void wl_lock(struct wl_private *lp,
 	                       unsigned long *flags)
 {
 	spin_lock_irqsave(&lp->slock, *flags);
 }
 
-extern inline void wl_unlock(struct wl_private *lp,
+static inline void wl_unlock(struct wl_private *lp,
 	                          unsigned long *flags)
 {
 	spin_unlock_irqrestore(&lp->slock, *flags);

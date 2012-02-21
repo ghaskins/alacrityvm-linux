@@ -161,7 +161,17 @@ static int logfs_writepage(struct page *page, struct writeback_control *wbc)
 
 static void logfs_invalidatepage(struct page *page, unsigned long offset)
 {
-	move_page_to_btree(page);
+	struct logfs_block *block = logfs_block(page);
+
+	if (block->reserved_bytes) {
+		struct super_block *sb = page->mapping->host->i_sb;
+		struct logfs_super *super = logfs_super(sb);
+
+		super->s_dirty_pages -= block->reserved_bytes;
+		block->ops->free_block(sb, block);
+		BUG_ON(bitmap_weight(block->alias_map, LOGFS_BLOCK_FACTOR));
+	} else
+		move_page_to_btree(page);
 	BUG_ON(PagePrivate(page) || page->private);
 }
 
@@ -171,9 +181,9 @@ static int logfs_releasepage(struct page *page, gfp_t only_xfs_uses_this)
 }
 
 
-int logfs_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
-		unsigned long arg)
+long logfs_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
+	struct inode *inode = file->f_path.dentry->d_inode;
 	struct logfs_inode *li = logfs_inode(inode);
 	unsigned int oldflags, flags;
 	int err;
@@ -186,7 +196,7 @@ int logfs_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		if (IS_RDONLY(inode))
 			return -EROFS;
 
-		if (!is_owner_or_cap(inode))
+		if (!inode_owner_or_capable(inode))
 			return -EACCES;
 
 		err = get_user(flags, (int __user *)arg);
@@ -209,13 +219,20 @@ int logfs_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 	}
 }
 
-int logfs_fsync(struct file *file, struct dentry *dentry, int datasync)
+int logfs_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 {
-	struct super_block *sb = dentry->d_inode->i_sb;
-	struct logfs_super *super = logfs_super(sb);
+	struct super_block *sb = file->f_mapping->host->i_sb;
+	struct inode *inode = file->f_mapping->host;
+	int ret;
 
-	/* FIXME: write anchor */
-	super->s_devops->sync(sb);
+	ret = filemap_write_and_wait_range(inode->i_mapping, start, end);
+	if (ret)
+		return ret;
+
+	mutex_lock(&inode->i_mutex);
+	logfs_write_anchor(sb);
+	mutex_unlock(&inode->i_mutex);
+
 	return 0;
 }
 
@@ -224,15 +241,19 @@ static int logfs_setattr(struct dentry *dentry, struct iattr *attr)
 	struct inode *inode = dentry->d_inode;
 	int err = 0;
 
-	if (attr->ia_valid & ATTR_SIZE)
-		err = logfs_truncate(inode, attr->ia_size);
-	attr->ia_valid &= ~ATTR_SIZE;
+	err = inode_change_ok(inode, attr);
+	if (err)
+		return err;
 
-	if (!err)
-		err = inode_change_ok(inode, attr);
-	if (!err)
-		err = inode_setattr(inode, attr);
-	return err;
+	if (attr->ia_valid & ATTR_SIZE) {
+		err = logfs_truncate(inode, attr->ia_size);
+		if (err)
+			return err;
+	}
+
+	setattr_copy(inode, attr);
+	mark_inode_dirty(inode);
+	return 0;
 }
 
 const struct inode_operations logfs_reg_iops = {
@@ -243,7 +264,7 @@ const struct file_operations logfs_reg_fops = {
 	.aio_read	= generic_file_aio_read,
 	.aio_write	= generic_file_aio_write,
 	.fsync		= logfs_fsync,
-	.ioctl		= logfs_ioctl,
+	.unlocked_ioctl	= logfs_ioctl,
 	.llseek		= generic_file_llseek,
 	.mmap		= generic_file_readonly_mmap,
 	.open		= generic_file_open,

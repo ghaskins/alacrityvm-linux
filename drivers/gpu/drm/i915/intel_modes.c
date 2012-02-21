@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
- * Copyright (c) 2007 Intel Corporation
+ * Copyright (c) 2007, 2010 Intel Corporation
  *   Jesse Barnes <jesse.barnes@intel.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -26,6 +26,7 @@
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/fb.h>
+#include <drm/drm_edid.h>
 #include "drmP.h"
 #include "intel_drv.h"
 #include "i915_drv.h"
@@ -34,11 +35,11 @@
  * intel_ddc_probe
  *
  */
-bool intel_ddc_probe(struct intel_encoder *intel_encoder)
+bool intel_ddc_probe(struct intel_encoder *intel_encoder, int ddc_bus)
 {
+	struct drm_i915_private *dev_priv = intel_encoder->base.dev->dev_private;
 	u8 out_buf[] = { 0x0, 0x0};
 	u8 buf[2];
-	int ret;
 	struct i2c_msg msgs[] = {
 		{
 			.addr = 0x50,
@@ -54,36 +55,90 @@ bool intel_ddc_probe(struct intel_encoder *intel_encoder)
 		}
 	};
 
-	intel_i2c_quirk_set(intel_encoder->base.dev, true);
-	ret = i2c_transfer(intel_encoder->ddc_bus, msgs, 2);
-	intel_i2c_quirk_set(intel_encoder->base.dev, false);
-	if (ret == 2)
-		return true;
-
-	return false;
+	return i2c_transfer(&dev_priv->gmbus[ddc_bus].adapter, msgs, 2) == 2;
 }
 
 /**
  * intel_ddc_get_modes - get modelist from monitor
  * @connector: DRM connector device to use
+ * @adapter: i2c adapter
  *
  * Fetch the EDID information from @connector using the DDC bus.
  */
-int intel_ddc_get_modes(struct intel_encoder *intel_encoder)
+int intel_ddc_get_modes(struct drm_connector *connector,
+			struct i2c_adapter *adapter)
 {
 	struct edid *edid;
 	int ret = 0;
 
-	intel_i2c_quirk_set(intel_encoder->base.dev, true);
-	edid = drm_get_edid(&intel_encoder->base, intel_encoder->ddc_bus);
-	intel_i2c_quirk_set(intel_encoder->base.dev, false);
+	edid = drm_get_edid(connector, adapter);
 	if (edid) {
-		drm_mode_connector_update_edid_property(&intel_encoder->base,
-							edid);
-		ret = drm_add_edid_modes(&intel_encoder->base, edid);
-		intel_encoder->base.display_info.raw_edid = NULL;
+		drm_mode_connector_update_edid_property(connector, edid);
+		ret = drm_add_edid_modes(connector, edid);
+		drm_edid_to_eld(connector, edid);
+		connector->display_info.raw_edid = NULL;
 		kfree(edid);
 	}
 
 	return ret;
+}
+
+static const char *force_audio_names[] = {
+	"off",
+	"auto",
+	"on",
+};
+
+void
+intel_attach_force_audio_property(struct drm_connector *connector)
+{
+	struct drm_device *dev = connector->dev;
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct drm_property *prop;
+	int i;
+
+	prop = dev_priv->force_audio_property;
+	if (prop == NULL) {
+		prop = drm_property_create(dev, DRM_MODE_PROP_ENUM,
+					   "audio",
+					   ARRAY_SIZE(force_audio_names));
+		if (prop == NULL)
+			return;
+
+		for (i = 0; i < ARRAY_SIZE(force_audio_names); i++)
+			drm_property_add_enum(prop, i, i-1, force_audio_names[i]);
+
+		dev_priv->force_audio_property = prop;
+	}
+	drm_connector_attach_property(connector, prop, 0);
+}
+
+static const char *broadcast_rgb_names[] = {
+	"Full",
+	"Limited 16:235",
+};
+
+void
+intel_attach_broadcast_rgb_property(struct drm_connector *connector)
+{
+	struct drm_device *dev = connector->dev;
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct drm_property *prop;
+	int i;
+
+	prop = dev_priv->broadcast_rgb_property;
+	if (prop == NULL) {
+		prop = drm_property_create(dev, DRM_MODE_PROP_ENUM,
+					   "Broadcast RGB",
+					   ARRAY_SIZE(broadcast_rgb_names));
+		if (prop == NULL)
+			return;
+
+		for (i = 0; i < ARRAY_SIZE(broadcast_rgb_names); i++)
+			drm_property_add_enum(prop, i, i, broadcast_rgb_names[i]);
+
+		dev_priv->broadcast_rgb_property = prop;
+	}
+
+	drm_connector_attach_property(connector, prop, 0);
 }

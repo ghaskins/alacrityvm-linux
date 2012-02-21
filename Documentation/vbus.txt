@@ -1,7 +1,7 @@
 
 Virtual-Bus:
 ======================
-Author: Gregory Haskins <ghaskins@novell.com>
+Author: Gregory Haskins <gregory.haskins@gmail.com>
 
 
 

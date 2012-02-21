@@ -1,10 +1,11 @@
 /*
  * KVM module interface - Allows external modules to interface with a guest
  *
- * Copyright 2009 Novell.  All Rights Reserved.
+ * Copyright 2009 Novell, Gregory Haskins.  All Rights Reserved.
+ * Copyright 2012 Gregory Haskins.
  *
  * Author:
- *      Gregory Haskins <ghaskins@novell.com>
+ *      Gregory Haskins <gregory.haskins@gmail.com>
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License
@@ -27,7 +28,6 @@
 #include <linux/mmu_context.h>
 #include <linux/kvm_host.h>
 #include <linux/kvm_xinterface.h>
-#include <linux/slab.h>
 
 #include "iodev.h"
 
@@ -418,8 +418,7 @@ xinterface_ioevent(struct kvm_xinterface *intf,
 	struct _xinterface         *_intf = to_intf(intf);
 	struct kvm                 *kvm = _intf->kvm;
 	int                         pio = flags & KVM_XIOEVENT_FLAG_PIO;
-	enum kvm_bus                bus_idx = pio ? KVM_PIO_BUS : KVM_MMIO_BUS;
-
+	enum kvm_bus                bus = pio ? KVM_PIO_BUS : KVM_MMIO_BUS;
 	struct _ioevent            *p;
 	int                         ret;
 
@@ -450,11 +449,11 @@ xinterface_ioevent(struct kvm_xinterface *intf,
 
 	p->addr    = addr;
 	p->length  = len;
-	p->bus     = bus_idx;
+	p->bus     = bus;
 
 	kvm_iodevice_init(&p->dev, &ioevent_device_ops);
 
-	ret = kvm_io_bus_register_dev(kvm, bus_idx, &p->dev);
+	ret = kvm_io_bus_register_dev(kvm, bus, p->addr, p->length, &p->dev);
 	if (ret < 0)
 		goto fail;
 

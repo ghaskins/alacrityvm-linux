@@ -22,6 +22,7 @@
  */
 
 #include <linux/types.h>
+#include <linux/gpio.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -43,16 +44,19 @@
 
 #include <mach/hardware.h>
 #include <mach/board.h>
-#include <mach/gpio.h>
 #include <mach/at91rm9200_mc.h>
+#include <mach/cpu.h>
 
 #include "generic.h"
 
 
-static void __init yl9200_map_io(void)
+static void __init yl9200_init_early(void)
 {
+	/* Set cpu type: PQFP */
+	at91rm9200_set_type(ARCH_REVISON_9200_PQFP);
+
 	/* Initialize processor: 18.432 MHz crystal */
-	at91rm9200_initialize(18432000, AT91RM9200_PQFP);
+	at91_initialize(18432000);
 
 	/* Setup the LEDs D2=PB17 (timer), D3=PB16 (cpu) */
 	at91_init_leds(AT91_PIN_PB16, AT91_PIN_PB17);
@@ -74,12 +78,6 @@ static void __init yl9200_map_io(void)
 	/* set serial console to ttyS0 (ie, DBGU) */
 	at91_set_serial_console(0);
 }
-
-static void __init yl9200_init_irq(void)
-{
-	at91rm9200_init_interrupts(NULL);
-}
-
 
 /*
  * LEDs
@@ -174,19 +172,14 @@ static struct mtd_partition __initdata yl9200_nand_partition[] = {
 	}
 };
 
-static struct mtd_partition * __init nand_partitions(int size, int *num_partitions)
-{
-	*num_partitions = ARRAY_SIZE(yl9200_nand_partition);
-	return yl9200_nand_partition;
-}
-
 static struct atmel_nand_data __initdata yl9200_nand_data = {
 	.ale		= 6,
 	.cle		= 7,
 	// .det_pin	= ... not connected
 	.rdy_pin	= AT91_PIN_PC14,	/* R/!B (Sheet10) */
 	.enable_pin	= AT91_PIN_PC15,	/* !CE  (Sheet10) */
-	.partition_info	= nand_partitions,
+	.parts		= yl9200_nand_partition,
+	.num_parts	= ARRAY_SIZE(yl9200_nand_partition),
 };
 
 /*
@@ -387,11 +380,11 @@ static struct spi_board_info yl9200_spi_devices[] = {
  * EPSON S1D13806 FB (discontinued chip)
  * EPSON S1D13506 FB
  */
-#if defined(CONFIG_FB_S1D135XX) || defined(CONFIG_FB_S1D13XXX_MODULE)
+#if defined(CONFIG_FB_S1D13XXX) || defined(CONFIG_FB_S1D13XXX_MODULE)
 #include <video/s1d13xxxfb.h>
 
 
-static void __init yl9200_init_video(void)
+static void yl9200_init_video(void)
 {
 	/* NWAIT Signal */
 	at91_set_A_periph(AT91_PIN_PC6, 0);
@@ -594,11 +587,9 @@ static void __init yl9200_board_init(void)
 
 MACHINE_START(YL9200, "uCdragon YL-9200")
 	/* Maintainer: S.Birtles */
-	.phys_io	= AT91_BASE_SYS,
-	.io_pg_offst	= (AT91_VA_BASE_SYS >> 18) & 0xfffc,
-	.boot_params	= AT91_SDRAM_BASE + 0x100,
 	.timer		= &at91rm9200_timer,
-	.map_io		= yl9200_map_io,
-	.init_irq	= yl9200_init_irq,
+	.map_io		= at91_map_io,
+	.init_early	= yl9200_init_early,
+	.init_irq	= at91_init_irq_default,
 	.init_machine	= yl9200_board_init,
 MACHINE_END

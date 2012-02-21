@@ -15,6 +15,7 @@
 #include <linux/crypto.h>
 #include <linux/list.h>
 #include <linux/kernel.h>
+#include <linux/skbuff.h>
 
 struct module;
 struct rtattr;
@@ -26,6 +27,7 @@ struct crypto_type {
 	int (*init)(struct crypto_tfm *tfm, u32 type, u32 mask);
 	int (*init_tfm)(struct crypto_tfm *tfm);
 	void (*show)(struct seq_file *m, struct crypto_alg *alg);
+	int (*report)(struct sk_buff *skb, struct crypto_alg *alg);
 	struct crypto_alg *(*lookup)(const char *name, u32 type, u32 mask);
 
 	unsigned int type;
@@ -103,6 +105,23 @@ struct blkcipher_walk {
 	unsigned int blocksize;
 };
 
+struct ablkcipher_walk {
+	struct {
+		struct page *page;
+		unsigned int offset;
+	} src, dst;
+
+	struct scatter_walk	in;
+	unsigned int		nbytes;
+	struct scatter_walk	out;
+	unsigned int		total;
+	struct list_head	buffers;
+	u8			*iv_buffer;
+	u8			*iv;
+	int			flags;
+	unsigned int		blocksize;
+};
+
 extern const struct crypto_type crypto_ablkcipher_type;
 extern const struct crypto_type crypto_aead_type;
 extern const struct crypto_type crypto_blkcipher_type;
@@ -172,6 +191,12 @@ int blkcipher_walk_phys(struct blkcipher_desc *desc,
 int blkcipher_walk_virt_block(struct blkcipher_desc *desc,
 			      struct blkcipher_walk *walk,
 			      unsigned int blocksize);
+
+int ablkcipher_walk_done(struct ablkcipher_request *req,
+			 struct ablkcipher_walk *walk, int err);
+int ablkcipher_walk_phys(struct ablkcipher_request *req,
+			 struct ablkcipher_walk *walk);
+void __ablkcipher_walk_complete(struct ablkcipher_walk *walk);
 
 static inline void *crypto_tfm_ctx_aligned(struct crypto_tfm *tfm)
 {
@@ -281,6 +306,23 @@ static inline void blkcipher_walk_init(struct blkcipher_walk *walk,
 	walk->in.sg = src;
 	walk->out.sg = dst;
 	walk->total = nbytes;
+}
+
+static inline void ablkcipher_walk_init(struct ablkcipher_walk *walk,
+					struct scatterlist *dst,
+					struct scatterlist *src,
+					unsigned int nbytes)
+{
+	walk->in.sg = src;
+	walk->out.sg = dst;
+	walk->total = nbytes;
+	INIT_LIST_HEAD(&walk->buffers);
+}
+
+static inline void ablkcipher_walk_complete(struct ablkcipher_walk *walk)
+{
+	if (unlikely(!list_empty(&walk->buffers)))
+		__ablkcipher_walk_complete(walk);
 }
 
 static inline struct crypto_async_request *crypto_get_backlog(

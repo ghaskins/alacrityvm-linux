@@ -2,6 +2,7 @@
  * IPv6 library code, needed by static components when full IPv6 support is
  * not configured or static.
  */
+#include <linux/export.h>
 #include <net/ipv6.h>
 
 /*
@@ -13,12 +14,12 @@ int ipv6_ext_hdr(u8 nexthdr)
 	/*
 	 * find out if nexthdr is an extension header or a protocol
 	 */
-	return ( (nexthdr == NEXTHDR_HOP)	||
+	return   (nexthdr == NEXTHDR_HOP)	||
 		 (nexthdr == NEXTHDR_ROUTING)	||
 		 (nexthdr == NEXTHDR_FRAGMENT)	||
 		 (nexthdr == NEXTHDR_AUTH)	||
 		 (nexthdr == NEXTHDR_NONE)	||
-		 (nexthdr == NEXTHDR_DEST) );
+		 (nexthdr == NEXTHDR_DEST);
 }
 
 /*

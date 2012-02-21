@@ -30,6 +30,7 @@
 #define PCI_HAS_IO_ECS		0x40000
 #define PCI_NOASSIGN_ROMS	0x80000
 #define PCI_ROOT_NO_CRS		0x100000
+#define PCI_NOASSIGN_BARS	0x200000
 
 extern unsigned int pci_probe;
 extern unsigned long pirq_table_addr;
@@ -46,12 +47,15 @@ enum pci_bf_sort_state {
 extern unsigned int pcibios_max_latency;
 
 void pcibios_resource_survey(void);
+void pcibios_set_cache_line_size(void);
 
 /* pci-pc.c */
 
 extern int pcibios_last_bus;
 extern struct pci_bus *pci_root_bus;
 extern struct pci_ops pci_root_ops;
+
+void pcibios_scan_specific_bus(int busn);
 
 /* pci-irq.c */
 
@@ -83,7 +87,7 @@ struct irq_routing_table {
 
 extern unsigned int pcibios_irq_mask;
 
-extern spinlock_t pci_config_lock;
+extern raw_spinlock_t pci_config_lock;
 
 extern int (*pcibios_enable_irq)(struct pci_dev *dev);
 extern void (*pcibios_disable_irq)(struct pci_dev *dev);
@@ -95,10 +99,10 @@ struct pci_raw_ops {
 						int reg, int len, u32 val);
 };
 
-extern struct pci_raw_ops *raw_pci_ops;
-extern struct pci_raw_ops *raw_pci_ext_ops;
+extern const struct pci_raw_ops *raw_pci_ops;
+extern const struct pci_raw_ops *raw_pci_ext_ops;
 
-extern struct pci_raw_ops pci_direct_conf1;
+extern const struct pci_raw_ops pci_direct_conf1;
 extern bool port_cf9_safe;
 
 /* arch_initcall level */

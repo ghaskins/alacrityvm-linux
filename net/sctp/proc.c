@@ -37,6 +37,7 @@
 #include <linux/types.h>
 #include <linux/seq_file.h>
 #include <linux/init.h>
+#include <linux/export.h>
 #include <net/sctp/sctp.h>
 #include <net/ip.h> /* for snmp_fold_field */
 
@@ -181,7 +182,6 @@ static void * sctp_eps_seq_start(struct seq_file *seq, loff_t *pos)
 
 static void sctp_eps_seq_stop(struct seq_file *seq, void *v)
 {
-	return;
 }
 
 
@@ -213,7 +213,7 @@ static int sctp_eps_seq_show(struct seq_file *seq, void *v)
 	sctp_for_each_hentry(epb, node, &head->chain) {
 		ep = sctp_ep(epb);
 		sk = epb->sk;
-		seq_printf(seq, "%8p %8p %-3d %-3d %-4d %-5d %5d %5lu ", ep, sk,
+		seq_printf(seq, "%8pK %8pK %-3d %-3d %-4d %-5d %5d %5lu ", ep, sk,
 			   sctp_sk(sk)->type, sk->sk_state, hash,
 			   epb->bind_addr.port,
 			   sock_i_uid(sk), sock_i_ino(sk));
@@ -286,7 +286,6 @@ static void * sctp_assocs_seq_start(struct seq_file *seq, loff_t *pos)
 
 static void sctp_assocs_seq_stop(struct seq_file *seq, void *v)
 {
-	return;
 }
 
 
@@ -318,7 +317,7 @@ static int sctp_assocs_seq_show(struct seq_file *seq, void *v)
 		assoc = sctp_assoc(epb);
 		sk = epb->sk;
 		seq_printf(seq,
-			   "%8p %8p %-3d %-3d %-2d %-4d "
+			   "%8pK %8pK %-3d %-3d %-2d %-4d "
 			   "%4d %8d %8d %7d %5lu %-5d %5d ",
 			   assoc, sk, sctp_sk(sk)->type, sk->sk_state,
 			   assoc->state, hash,
@@ -409,7 +408,6 @@ static void *sctp_remaddr_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 
 static void sctp_remaddr_seq_stop(struct seq_file *seq, void *v)
 {
-	return;
 }
 
 static int sctp_remaddr_seq_show(struct seq_file *seq, void *v)

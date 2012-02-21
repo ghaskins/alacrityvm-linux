@@ -67,7 +67,7 @@
 #include <linux/i2c.h>
 #include <linux/init.h>
 #include <linux/acpi.h>
-#include <asm/io.h>
+#include <linux/io.h>
 
 /* ALI15X3 SMBus address offsets */
 #define SMBHSTSTS	(0 + ali15x3_smba)
@@ -318,7 +318,7 @@ static int ali15x3_transaction(struct i2c_adapter *adap)
 
 	/*
 	  Unfortunately the ALI SMB controller maps "no response" and "bus
-	  collision" into a single bit. No reponse is the usual case so don't
+	  collision" into a single bit. No response is the usual case so don't
 	  do a printk.
 	  This means that bus collisions go unreported.
 	*/

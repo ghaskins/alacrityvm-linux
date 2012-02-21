@@ -1,3 +1,4 @@
+#include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
@@ -5,7 +6,6 @@
 #include <linux/uaccess.h>
 #include <linux/vbus.h>
 #include <linux/vbus_client.h>
-#include <linux/slab.h>
 #include "vbus.h"
 
 static int
@@ -299,7 +299,8 @@ _deviceshm(struct vbus_client *client,
 		}
 
 		 /* one for map-ref, one for list-ref */
-		kref_set(&_signal->kref, 2);
+		kref_init(&_signal->kref);
+		kref_get(&_signal->kref);
 		_signal->signal = signal;
 		shm_signal_get(signal);
 

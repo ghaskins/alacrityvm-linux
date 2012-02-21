@@ -33,7 +33,9 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/vmalloc.h>
+#include <linux/export.h>
 #include <asm/xen/hypervisor.h>
+#include <asm/xen/page.h>
 #include <xen/interface/xen.h>
 #include <xen/interface/event_channel.h>
 #include <xen/events.h>
@@ -50,6 +52,8 @@ const char *xenbus_strstate(enum xenbus_state state)
 		[ XenbusStateConnected    ] = "Connected",
 		[ XenbusStateClosing      ] = "Closing",
 		[ XenbusStateClosed	  ] = "Closed",
+		[XenbusStateReconfiguring] = "Reconfiguring",
+		[XenbusStateReconfigured] = "Reconfigured",
 	};
 	return (state < ARRAY_SIZE(name)) ? name[state] : "INVALID";
 }
@@ -133,6 +137,64 @@ int xenbus_watch_pathfmt(struct xenbus_device *dev,
 }
 EXPORT_SYMBOL_GPL(xenbus_watch_pathfmt);
 
+static void xenbus_switch_fatal(struct xenbus_device *, int, int,
+				const char *, ...);
+
+static int
+__xenbus_switch_state(struct xenbus_device *dev,
+		      enum xenbus_state state, int depth)
+{
+	/* We check whether the state is currently set to the given value, and
+	   if not, then the state is set.  We don't want to unconditionally
+	   write the given state, because we don't want to fire watches
+	   unnecessarily.  Furthermore, if the node has gone, we don't write
+	   to it, as the device will be tearing down, and we don't want to
+	   resurrect that directory.
+
+	   Note that, because of this cached value of our state, this
+	   function will not take a caller's Xenstore transaction
+	   (something it was trying to in the past) because dev->state
+	   would not get reset if the transaction was aborted.
+	 */
+
+	struct xenbus_transaction xbt;
+	int current_state;
+	int err, abort;
+
+	if (state == dev->state)
+		return 0;
+
+again:
+	abort = 1;
+
+	err = xenbus_transaction_start(&xbt);
+	if (err) {
+		xenbus_switch_fatal(dev, depth, err, "starting transaction");
+		return 0;
+	}
+
+	err = xenbus_scanf(xbt, dev->nodename, "state", "%d", &current_state);
+	if (err != 1)
+		goto abort;
+
+	err = xenbus_printf(xbt, dev->nodename, "state", "%d", state);
+	if (err) {
+		xenbus_switch_fatal(dev, depth, err, "writing new state");
+		goto abort;
+	}
+
+	abort = 0;
+abort:
+	err = xenbus_transaction_end(xbt, abort);
+	if (err) {
+		if (err == -EAGAIN && !abort)
+			goto again;
+		xenbus_switch_fatal(dev, depth, err, "ending transaction");
+	} else
+		dev->state = state;
+
+	return 0;
+}
 
 /**
  * xenbus_switch_state
@@ -145,42 +207,9 @@ EXPORT_SYMBOL_GPL(xenbus_watch_pathfmt);
  */
 int xenbus_switch_state(struct xenbus_device *dev, enum xenbus_state state)
 {
-	/* We check whether the state is currently set to the given value, and
-	   if not, then the state is set.  We don't want to unconditionally
-	   write the given state, because we don't want to fire watches
-	   unnecessarily.  Furthermore, if the node has gone, we don't write
-	   to it, as the device will be tearing down, and we don't want to
-	   resurrect that directory.
-
-	   Note that, because of this cached value of our state, this function
-	   will not work inside a Xenstore transaction (something it was
-	   trying to in the past) because dev->state would not get reset if
-	   the transaction was aborted.
-
-	 */
-
-	int current_state;
-	int err;
-
-	if (state == dev->state)
-		return 0;
-
-	err = xenbus_scanf(XBT_NIL, dev->nodename, "state", "%d",
-			   &current_state);
-	if (err != 1)
-		return 0;
-
-	err = xenbus_printf(XBT_NIL, dev->nodename, "state", "%d", state);
-	if (err) {
-		if (state != XenbusStateClosing) /* Avoid looping */
-			xenbus_dev_fatal(dev, err, "writing new state");
-		return err;
-	}
-
-	dev->state = state;
-
-	return 0;
+	return __xenbus_switch_state(dev, state, 0);
 }
+
 EXPORT_SYMBOL_GPL(xenbus_switch_state);
 
 int xenbus_frontend_closed(struct xenbus_device *dev)
@@ -282,6 +311,23 @@ void xenbus_dev_fatal(struct xenbus_device *dev, int err, const char *fmt, ...)
 	xenbus_switch_state(dev, XenbusStateClosing);
 }
 EXPORT_SYMBOL_GPL(xenbus_dev_fatal);
+
+/**
+ * Equivalent to xenbus_dev_fatal(dev, err, fmt, args), but helps
+ * avoiding recursion within xenbus_switch_state.
+ */
+static void xenbus_switch_fatal(struct xenbus_device *dev, int depth, int err,
+				const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	xenbus_va_dev_error(dev, err, fmt, ap);
+	va_end(ap);
+
+	if (!depth)
+		__xenbus_switch_state(dev, XenbusStateClosing, 1);
+}
 
 /**
  * xenbus_grant_ring
@@ -391,25 +437,26 @@ EXPORT_SYMBOL_GPL(xenbus_free_evtchn);
 int xenbus_map_ring_valloc(struct xenbus_device *dev, int gnt_ref, void **vaddr)
 {
 	struct gnttab_map_grant_ref op = {
-		.flags = GNTMAP_host_map,
+		.flags = GNTMAP_host_map | GNTMAP_contains_pte,
 		.ref   = gnt_ref,
 		.dom   = dev->otherend_id,
 	};
 	struct vm_struct *area;
+	pte_t *pte;
 
 	*vaddr = NULL;
 
-	area = xen_alloc_vm_area(PAGE_SIZE);
+	area = alloc_vm_area(PAGE_SIZE, &pte);
 	if (!area)
 		return -ENOMEM;
 
-	op.host_addr = (unsigned long)area->addr;
+	op.host_addr = arbitrary_virt_to_machine(pte).maddr;
 
 	if (HYPERVISOR_grant_table_op(GNTTABOP_map_grant_ref, &op, 1))
 		BUG();
 
 	if (op.status != GNTST_okay) {
-		xen_free_vm_area(area);
+		free_vm_area(area);
 		xenbus_dev_fatal(dev, op.status,
 				 "mapping in shared page %d from domain %d",
 				 gnt_ref, dev->otherend_id);
@@ -482,6 +529,7 @@ int xenbus_unmap_ring_vfree(struct xenbus_device *dev, void *vaddr)
 	struct gnttab_unmap_grant_ref op = {
 		.host_addr = (unsigned long)vaddr,
 	};
+	unsigned int level;
 
 	/* It'd be nice if linux/vmalloc.h provided a find_vm_area(void *addr)
 	 * method so that we don't have to muck with vmalloc internals here.
@@ -503,12 +551,14 @@ int xenbus_unmap_ring_vfree(struct xenbus_device *dev, void *vaddr)
 	}
 
 	op.handle = (grant_handle_t)area->phys_addr;
+	op.host_addr = arbitrary_virt_to_machine(
+		lookup_address((unsigned long)vaddr, &level)).maddr;
 
 	if (HYPERVISOR_grant_table_op(GNTTABOP_unmap_grant_ref, &op, 1))
 		BUG();
 
 	if (op.status == GNTST_okay)
-		xen_free_vm_area(area);
+		free_vm_area(area);
 	else
 		xenbus_dev_error(dev, op.status,
 				 "unmapping page at handle %d error %d",

@@ -22,6 +22,7 @@
  */
 
 #include <linux/slab.h>
+#include <linux/module.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_dbg.h>
 #include <scsi/scsi_eh.h>
@@ -225,7 +226,8 @@ static void start_stop_endio(struct request *req, int error)
 		}
 	}
 done:
-	blk_put_request(req);
+	req->end_io_data = NULL;
+	__blk_put_request(req->q, req);
 	if (h->callback_fn) {
 		h->callback_fn(h->callback_data, err);
 		h->callback_fn = h->callback_data = NULL;
@@ -338,8 +340,8 @@ static int hp_sw_bus_attach(struct scsi_device *sdev)
 	unsigned long flags;
 	int ret;
 
-	scsi_dh_data = kzalloc(sizeof(struct scsi_device_handler *)
-			       + sizeof(struct hp_sw_dh_data) , GFP_KERNEL);
+	scsi_dh_data = kzalloc(sizeof(*scsi_dh_data)
+			       + sizeof(*h) , GFP_KERNEL);
 	if (!scsi_dh_data) {
 		sdev_printk(KERN_ERR, sdev, "%s: Attach Failed\n",
 			    HP_SW_NAME);

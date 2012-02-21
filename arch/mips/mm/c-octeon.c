@@ -169,6 +169,10 @@ static void octeon_flush_cache_page(struct vm_area_struct *vma,
 		octeon_flush_icache_all_cores(vma);
 }
 
+static void octeon_flush_kernel_vmap_range(unsigned long vaddr, int size)
+{
+	BUG();
+}
 
 /**
  * Probe Octeon's caches
@@ -181,10 +185,10 @@ static void __cpuinit probe_octeon(void)
 	unsigned int config1;
 	struct cpuinfo_mips *c = &current_cpu_data;
 
+	config1 = read_c0_config1();
 	switch (c->cputype) {
 	case CPU_CAVIUM_OCTEON:
 	case CPU_CAVIUM_OCTEON_PLUS:
-		config1 = read_c0_config1();
 		c->icache.linesz = 2 << ((config1 >> 19) & 7);
 		c->icache.sets = 64 << ((config1 >> 22) & 7);
 		c->icache.ways = 1 + ((config1 >> 16) & 7);
@@ -201,6 +205,20 @@ static void __cpuinit probe_octeon(void)
 		dcache_size =
 			c->dcache.sets * c->dcache.ways * c->dcache.linesz;
 		c->dcache.waybit = ffs(dcache_size / c->dcache.ways) - 1;
+		c->options |= MIPS_CPU_PREFETCH;
+		break;
+
+	case CPU_CAVIUM_OCTEON2:
+		c->icache.linesz = 2 << ((config1 >> 19) & 7);
+		c->icache.sets = 8;
+		c->icache.ways = 37;
+		c->icache.flags |= MIPS_CACHE_VTAG;
+		icache_size = c->icache.sets * c->icache.ways * c->icache.linesz;
+
+		c->dcache.linesz = 128;
+		c->dcache.ways = 32;
+		c->dcache.sets = 8;
+		dcache_size = c->dcache.sets * c->dcache.ways * c->dcache.linesz;
 		c->options |= MIPS_CPU_PREFETCH;
 		break;
 
@@ -258,6 +276,8 @@ void __cpuinit octeon_cache_init(void)
 	flush_data_cache_page		= octeon_flush_data_cache_page;
 	flush_icache_range		= octeon_flush_icache_range;
 	local_flush_icache_range	= local_octeon_flush_icache_range;
+
+	__flush_kernel_vmap_range	= octeon_flush_kernel_vmap_range;
 
 	build_clear_page();
 	build_copy_page();

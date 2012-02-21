@@ -33,7 +33,7 @@
 #include <linux/completion.h>
 #include <linux/mutex.h>
 #include <linux/delay.h>
-#include <asm/io.h>
+#include <linux/io.h>
 
 #define DRV_NAME	"pmcmsptwi"
 
@@ -306,7 +306,7 @@ static int __devinit pmcmsptwi_probe(struct platform_device *pldev)
 	pmcmsptwi_data.irq = platform_get_irq(pldev, 0);
 	if (pmcmsptwi_data.irq) {
 		rc = request_irq(pmcmsptwi_data.irq, &pmcmsptwi_interrupt,
-			IRQF_SHARED | IRQF_DISABLED | IRQF_SAMPLE_RANDOM,
+			IRQF_SHARED | IRQF_SAMPLE_RANDOM,
 			pldev->name, &pmcmsptwi_data);
 		if (rc == 0) {
 			/*

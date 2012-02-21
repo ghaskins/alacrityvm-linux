@@ -140,6 +140,14 @@ config MACH_FSG
 	  FSG-3 device. For more information on this platform,
 	  see http://www.nslu2-linux.org/wiki/FSG3/HomePage
 
+config MACH_ARCOM_VULCAN
+	bool
+	prompt "Arcom/Eurotech Vulcan"
+	select PCI
+	help
+	  Say 'Y' here if you want your kernel to support Arcom's
+	  Vulcan board.
+
 #
 # Certain registers and IRQs are only enabled if supporting IXP465 CPUs
 #
@@ -170,6 +178,25 @@ config MACH_GTWX5715
 		"Console" UART is available on J11 as console
 		"High Speed" UART is n/c (as far as I can tell)
 		20 Pin ARM/Xscale JTAG interface on J2
+
+config MACH_DEVIXP
+	bool "Omicron DEVIXP"
+	help
+	  Say 'Y' here if you want your kernel to support the DEVIXP
+	  board from OMICRON electronics GmbH.
+
+config MACH_MICCPT
+	bool "Omicron MICCPT"
+	select PCI
+	help
+	  Say 'Y' here if you want your kernel to support the MICCPT
+	  board from OMICRON electronics GmbH.
+
+config MACH_MIC256
+	bool "Omicron MIC256"
+	help
+	  Say 'Y' here if you want your kernel to support the MIC256
+	  board from OMICRON electronics GmbH.
 
 comment "IXP4xx Options"
 

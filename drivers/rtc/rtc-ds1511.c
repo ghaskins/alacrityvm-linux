@@ -23,6 +23,7 @@
 #include <linux/rtc.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
+#include <linux/module.h>
 
 #define DRV_VERSION "0.6"
 
@@ -397,34 +398,18 @@ static int ds1511_rtc_alarm_irq_enable(struct device *dev, unsigned int enabled)
 	return 0;
 }
 
-static int ds1511_rtc_update_irq_enable(struct device *dev,
-	unsigned int enabled)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
-
-	if (pdata->irq <= 0)
-		return -EINVAL;
-	if (enabled)
-		pdata->irqen |= RTC_UF;
-	else
-		pdata->irqen &= ~RTC_UF;
-	ds1511_rtc_update_alarm(pdata);
-	return 0;
-}
-
 static const struct rtc_class_ops ds1511_rtc_ops = {
 	.read_time		= ds1511_rtc_read_time,
 	.set_time		= ds1511_rtc_set_time,
 	.read_alarm		= ds1511_rtc_read_alarm,
 	.set_alarm		= ds1511_rtc_set_alarm,
 	.alarm_irq_enable	= ds1511_rtc_alarm_irq_enable,
-	.update_irq_enable	= ds1511_rtc_update_irq_enable,
 };
 
  static ssize_t
-ds1511_nvram_read(struct kobject *kobj, struct bin_attribute *ba,
-				char *buf, loff_t pos, size_t size)
+ds1511_nvram_read(struct file *filp, struct kobject *kobj,
+		  struct bin_attribute *ba,
+		  char *buf, loff_t pos, size_t size)
 {
 	ssize_t count;
 
@@ -452,8 +437,9 @@ ds1511_nvram_read(struct kobject *kobj, struct bin_attribute *ba,
 }
 
  static ssize_t
-ds1511_nvram_write(struct kobject *kobj, struct bin_attribute *bin_attr,
-				char *buf, loff_t pos, size_t size)
+ds1511_nvram_write(struct file *filp, struct kobject *kobj,
+		   struct bin_attribute *bin_attr,
+		   char *buf, loff_t pos, size_t size)
 {
 	ssize_t count;
 
@@ -483,7 +469,7 @@ ds1511_nvram_write(struct kobject *kobj, struct bin_attribute *bin_attr,
 static struct bin_attribute ds1511_nvram_attr = {
 	.attr = {
 		.name = "nvram",
-		.mode = S_IRUGO | S_IWUGO,
+		.mode = S_IRUGO | S_IWUSR,
 	},
 	.size = DS1511_RAM_MAX,
 	.read = ds1511_nvram_read,
@@ -505,7 +491,7 @@ ds1511_rtc_probe(struct platform_device *pdev)
 	pdata = devm_kzalloc(&pdev->dev, sizeof(*pdata), GFP_KERNEL);
 	if (!pdata)
 		return -ENOMEM;
-	pdata->size = res->end - res->start + 1;
+	pdata->size = resource_size(res);
 	if (!devm_request_mem_region(&pdev->dev, res->start, pdata->size,
 			pdev->name))
 		return -EBUSY;

@@ -1,5 +1,5 @@
 /*
- * AMD Alchemy Semi PB1550 Referrence Board
+ * AMD Alchemy Semi PB1550 Reference Board
  * Board Registers defines.
  *
  * Copyright 2004 Embedded Edge LLC.
@@ -30,23 +30,15 @@
 #include <linux/types.h>
 #include <asm/mach-au1x00/au1xxx_psc.h>
 
-#define DBDMA_AC97_TX_CHAN	DSCR_CMD0_PSC1_TX
-#define DBDMA_AC97_RX_CHAN	DSCR_CMD0_PSC1_RX
-#define DBDMA_I2S_TX_CHAN	DSCR_CMD0_PSC3_TX
-#define DBDMA_I2S_RX_CHAN	DSCR_CMD0_PSC3_RX
+#define DBDMA_AC97_TX_CHAN	AU1550_DSCR_CMD0_PSC1_TX
+#define DBDMA_AC97_RX_CHAN	AU1550_DSCR_CMD0_PSC1_RX
+#define DBDMA_I2S_TX_CHAN	AU1550_DSCR_CMD0_PSC3_TX
+#define DBDMA_I2S_RX_CHAN	AU1550_DSCR_CMD0_PSC3_RX
 
-#define SPI_PSC_BASE		PSC0_BASE_ADDR
-#define AC97_PSC_BASE		PSC1_BASE_ADDR
-#define SMBUS_PSC_BASE		PSC2_BASE_ADDR
-#define I2S_PSC_BASE		PSC3_BASE_ADDR
-
-#if defined(CONFIG_MTD_PB1550_BOOT) && defined(CONFIG_MTD_PB1550_USER)
-#define PB1550_BOTH_BANKS
-#elif defined(CONFIG_MTD_PB1550_BOOT) && !defined(CONFIG_MTD_PB1550_USER)
-#define PB1550_BOOT_ONLY
-#elif !defined(CONFIG_MTD_PB1550_BOOT) && defined(CONFIG_MTD_PB1550_USER)
-#define PB1550_USER_ONLY
-#endif
+#define SPI_PSC_BASE		AU1550_PSC0_PHYS_ADDR
+#define AC97_PSC_BASE		AU1550_PSC1_PHYS_ADDR
+#define SMBUS_PSC_BASE		AU1550_PSC2_PHYS_ADDR
+#define I2S_PSC_BASE		AU1550_PSC3_PHYS_ADDR
 
 /*
  * Timing values as described in databook, * ns value stripped of

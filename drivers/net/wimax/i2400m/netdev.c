@@ -76,6 +76,7 @@
 #include <linux/slab.h>
 #include <linux/netdevice.h>
 #include <linux/ethtool.h>
+#include <linux/export.h>
 #include "i2400m.h"
 
 
@@ -84,17 +85,15 @@
 
 enum {
 /* netdev interface */
-	/*
-	 * Out of NWG spec (R1_v1.2.2), 3.3.3 ASN Bearer Plane MTU Size
-	 *
-	 * The MTU is 1400 or less
-	 */
-	I2400M_MAX_MTU = 1400,
 	/* 20 secs? yep, this is the maximum timeout that the device
 	 * might take to get out of IDLE / negotiate it with the base
 	 * station. We add 1sec for good measure. */
 	I2400M_TX_TIMEOUT = 21 * HZ,
-	I2400M_TX_QLEN = 5,
+	/*
+	 * Experimentation has determined that, 20 to be a good value
+	 * for minimizing the jitter in the throughput.
+	 */
+	I2400M_TX_QLEN = 20,
 };
 
 
@@ -168,7 +167,7 @@ void i2400m_wake_tx_work(struct work_struct *ws)
 	d_fnstart(3, dev, "(ws %p i2400m %p skb %p)\n", ws, i2400m, skb);
 	result = -EINVAL;
 	if (skb == NULL) {
-		dev_err(dev, "WAKE&TX: skb dissapeared!\n");
+		dev_err(dev, "WAKE&TX: skb disappeared!\n");
 		goto out_put;
 	}
 	/* If we have, somehow, lost the connection after this was
@@ -255,7 +254,6 @@ void i2400m_net_wake_stop(struct i2400m *i2400m)
 		kfree_skb(wake_tx_skb);
 	}
 	d_fnend(3, dev, "(i2400m %p) = void\n", i2400m);
-	return;
 }
 
 
@@ -434,7 +432,6 @@ void i2400m_tx_timeout(struct net_device *net_dev)
 	 * this, there might be data pending to be sent or not...
 	 */
 	net_dev->stats.tx_errors++;
-	return;
 }
 
 

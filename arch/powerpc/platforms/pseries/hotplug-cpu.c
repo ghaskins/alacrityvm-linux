@@ -19,7 +19,9 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/interrupt.h>
 #include <linux/delay.h>
+#include <linux/sched.h>	/* for idle_task_exit */
 #include <linux/cpu.h>
 #include <asm/system.h>
 #include <asm/prom.h>
@@ -28,7 +30,7 @@
 #include <asm/machdep.h>
 #include <asm/vdso_datapage.h>
 #include <asm/pSeries_reconfig.h>
-#include "xics.h"
+#include <asm/xics.h>
 #include "plpar_wrappers.h"
 #include "offline_states.h"
 
@@ -116,6 +118,9 @@ static void pseries_mach_cpu_die(void)
 
 	if (get_preferred_offline_state(cpu) == CPU_STATE_INACTIVE) {
 		set_cpu_current_state(cpu, CPU_STATE_INACTIVE);
+		if (ppc_md.suspend_disable_cpu)
+			ppc_md.suspend_disable_cpu();
+
 		cede_latency_hint = 2;
 
 		get_lppaca()->idle = 1;
@@ -131,7 +136,7 @@ static void pseries_mach_cpu_die(void)
 		get_lppaca()->idle = 0;
 
 		if (get_preferred_offline_state(cpu) == CPU_STATE_ONLINE) {
-			unregister_slb_shadow(hwcpu, __pa(get_slb_shadow()));
+			unregister_slb_shadow(hwcpu);
 
 			/*
 			 * Call to start_secondary_resume() will not return.
@@ -146,7 +151,7 @@ static void pseries_mach_cpu_die(void)
 	WARN_ON(get_preferred_offline_state(cpu) != CPU_STATE_OFFLINE);
 
 	set_cpu_current_state(cpu, CPU_STATE_OFFLINE);
-	unregister_slb_shadow(hwcpu, __pa(get_slb_shadow()));
+	unregister_slb_shadow(hwcpu);
 	rtas_stop_self();
 
 	/* Should never get here... */
@@ -163,7 +168,7 @@ static int pseries_cpu_disable(void)
 
 	/*fix boot_cpuid here*/
 	if (cpu == boot_cpuid)
-		boot_cpuid = any_online_cpu(cpu_online_map);
+		boot_cpuid = cpumask_any(cpu_online_mask);
 
 	/* FIXME: abstract this to not be platform specific later on */
 	xics_migrate_irqs_away();
@@ -190,12 +195,12 @@ static void pseries_cpu_die(unsigned int cpu)
 
 	if (get_preferred_offline_state(cpu) == CPU_STATE_INACTIVE) {
 		cpu_status = 1;
-		for (tries = 0; tries < 1000; tries++) {
+		for (tries = 0; tries < 5000; tries++) {
 			if (get_cpu_current_state(cpu) == CPU_STATE_INACTIVE) {
 				cpu_status = 0;
 				break;
 			}
-			cpu_relax();
+			msleep(1);
 		}
 	} else if (get_preferred_offline_state(cpu) == CPU_STATE_OFFLINE) {
 
@@ -213,7 +218,7 @@ static void pseries_cpu_die(unsigned int cpu)
 		       cpu, pcpu, cpu_status);
 	}
 
-	/* Isolation and deallocation are definatly done by
+	/* Isolation and deallocation are definitely done by
 	 * drslot_chrp_cpu.  If they were not they would be
 	 * done here.  Change isolate state to Isolate and
 	 * change allocation-state to Unusable.
@@ -222,7 +227,7 @@ static void pseries_cpu_die(unsigned int cpu)
 }
 
 /*
- * Update cpu_present_map and paca(s) for a new cpu node.  The wrinkle
+ * Update cpu_present_mask and paca(s) for a new cpu node.  The wrinkle
  * here is that a cpu device node may represent up to two logical cpus
  * in the SMT case.  We must honor the assumption in other code that
  * the logical ids for sibling SMT threads x and y are adjacent, such
@@ -231,7 +236,7 @@ static void pseries_cpu_die(unsigned int cpu)
 static int pseries_add_processor(struct device_node *np)
 {
 	unsigned int cpu;
-	cpumask_t candidate_map, tmp = CPU_MASK_NONE;
+	cpumask_var_t candidate_mask, tmp;
 	int err = -ENOSPC, len, nthreads, i;
 	const u32 *intserv;
 
@@ -239,48 +244,53 @@ static int pseries_add_processor(struct device_node *np)
 	if (!intserv)
 		return 0;
 
+	zalloc_cpumask_var(&candidate_mask, GFP_KERNEL);
+	zalloc_cpumask_var(&tmp, GFP_KERNEL);
+
 	nthreads = len / sizeof(u32);
 	for (i = 0; i < nthreads; i++)
-		cpu_set(i, tmp);
+		cpumask_set_cpu(i, tmp);
 
 	cpu_maps_update_begin();
 
-	BUG_ON(!cpus_subset(cpu_present_map, cpu_possible_map));
+	BUG_ON(!cpumask_subset(cpu_present_mask, cpu_possible_mask));
 
 	/* Get a bitmap of unoccupied slots. */
-	cpus_xor(candidate_map, cpu_possible_map, cpu_present_map);
-	if (cpus_empty(candidate_map)) {
+	cpumask_xor(candidate_mask, cpu_possible_mask, cpu_present_mask);
+	if (cpumask_empty(candidate_mask)) {
 		/* If we get here, it most likely means that NR_CPUS is
 		 * less than the partition's max processors setting.
 		 */
 		printk(KERN_ERR "Cannot add cpu %s; this system configuration"
 		       " supports %d logical cpus.\n", np->full_name,
-		       cpus_weight(cpu_possible_map));
+		       cpumask_weight(cpu_possible_mask));
 		goto out_unlock;
 	}
 
-	while (!cpus_empty(tmp))
-		if (cpus_subset(tmp, candidate_map))
+	while (!cpumask_empty(tmp))
+		if (cpumask_subset(tmp, candidate_mask))
 			/* Found a range where we can insert the new cpu(s) */
 			break;
 		else
-			cpus_shift_left(tmp, tmp, nthreads);
+			cpumask_shift_left(tmp, tmp, nthreads);
 
-	if (cpus_empty(tmp)) {
-		printk(KERN_ERR "Unable to find space in cpu_present_map for"
+	if (cpumask_empty(tmp)) {
+		printk(KERN_ERR "Unable to find space in cpu_present_mask for"
 		       " processor %s with %d thread(s)\n", np->name,
 		       nthreads);
 		goto out_unlock;
 	}
 
-	for_each_cpu_mask(cpu, tmp) {
-		BUG_ON(cpu_isset(cpu, cpu_present_map));
+	for_each_cpu(cpu, tmp) {
+		BUG_ON(cpu_present(cpu));
 		set_cpu_present(cpu, true);
 		set_hard_smp_processor_id(cpu, *intserv++);
 	}
 	err = 0;
 out_unlock:
 	cpu_maps_update_done();
+	free_cpumask_var(candidate_mask);
+	free_cpumask_var(tmp);
 	return err;
 }
 
@@ -311,7 +321,7 @@ static void pseries_remove_processor(struct device_node *np)
 			set_hard_smp_processor_id(cpu, -1);
 			break;
 		}
-		if (cpu == NR_CPUS)
+		if (cpu >= nr_cpu_ids)
 			printk(KERN_WARNING "Could not find cpu to remove "
 			       "with physical id 0x%x\n", intserv[i]);
 	}
@@ -321,21 +331,17 @@ static void pseries_remove_processor(struct device_node *np)
 static int pseries_smp_notifier(struct notifier_block *nb,
 				unsigned long action, void *node)
 {
-	int err = NOTIFY_OK;
+	int err = 0;
 
 	switch (action) {
 	case PSERIES_RECONFIG_ADD:
-		if (pseries_add_processor(node))
-			err = NOTIFY_BAD;
+		err = pseries_add_processor(node);
 		break;
 	case PSERIES_RECONFIG_REMOVE:
 		pseries_remove_processor(node);
 		break;
-	default:
-		err = NOTIFY_DONE;
-		break;
 	}
-	return err;
+	return notifier_from_errno(err);
 }
 
 static struct notifier_block pseries_smp_nb = {

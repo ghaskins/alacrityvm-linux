@@ -55,7 +55,6 @@
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-chip-ident.h>
-#include <media/v4l2-i2c-drv.h>
 #include <media/saa7127.h>
 
 static int debug;
@@ -625,23 +624,20 @@ static int saa7127_s_stream(struct v4l2_subdev *sd, int enable)
 	return saa7127_set_video_enable(sd, enable);
 }
 
-static int saa7127_g_fmt(struct v4l2_subdev *sd, struct v4l2_format *fmt)
+static int saa7127_g_sliced_fmt(struct v4l2_subdev *sd, struct v4l2_sliced_vbi_format *fmt)
 {
 	struct saa7127_state *state = to_state(sd);
 
-	if (fmt->type != V4L2_BUF_TYPE_SLICED_VBI_CAPTURE)
-		return -EINVAL;
-
-	memset(&fmt->fmt.sliced, 0, sizeof(fmt->fmt.sliced));
+	memset(fmt, 0, sizeof(*fmt));
 	if (state->vps_enable)
-		fmt->fmt.sliced.service_lines[0][16] = V4L2_SLICED_VPS;
+		fmt->service_lines[0][16] = V4L2_SLICED_VPS;
 	if (state->wss_enable)
-		fmt->fmt.sliced.service_lines[0][23] = V4L2_SLICED_WSS_625;
+		fmt->service_lines[0][23] = V4L2_SLICED_WSS_625;
 	if (state->cc_enable) {
-		fmt->fmt.sliced.service_lines[0][21] = V4L2_SLICED_CAPTION_525;
-		fmt->fmt.sliced.service_lines[1][21] = V4L2_SLICED_CAPTION_525;
+		fmt->service_lines[0][21] = V4L2_SLICED_CAPTION_525;
+		fmt->service_lines[1][21] = V4L2_SLICED_CAPTION_525;
 	}
-	fmt->fmt.sliced.service_set =
+	fmt->service_set =
 		(state->vps_enable ? V4L2_SLICED_VPS : 0) |
 		(state->wss_enable ? V4L2_SLICED_WSS_625 : 0) |
 		(state->cc_enable ? V4L2_SLICED_CAPTION_525 : 0);
@@ -727,16 +723,20 @@ static const struct v4l2_subdev_core_ops saa7127_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops saa7127_video_ops = {
-	.s_vbi_data = saa7127_s_vbi_data,
-	.g_fmt = saa7127_g_fmt,
 	.s_std_output = saa7127_s_std_output,
 	.s_routing = saa7127_s_routing,
 	.s_stream = saa7127_s_stream,
 };
 
+static const struct v4l2_subdev_vbi_ops saa7127_vbi_ops = {
+	.s_vbi_data = saa7127_s_vbi_data,
+	.g_sliced_fmt = saa7127_g_sliced_fmt,
+};
+
 static const struct v4l2_subdev_ops saa7127_ops = {
 	.core = &saa7127_core_ops,
 	.video = &saa7127_video_ops,
+	.vbi = &saa7127_vbi_ops,
 };
 
 /* ----------------------------------------------------------------------- */
@@ -842,9 +842,25 @@ static struct i2c_device_id saa7127_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, saa7127_id);
 
-static struct v4l2_i2c_driver_data v4l2_i2c_data = {
-	.name = "saa7127",
-	.probe = saa7127_probe,
-	.remove = saa7127_remove,
-	.id_table = saa7127_id,
+static struct i2c_driver saa7127_driver = {
+	.driver = {
+		.owner	= THIS_MODULE,
+		.name	= "saa7127",
+	},
+	.probe		= saa7127_probe,
+	.remove		= saa7127_remove,
+	.id_table	= saa7127_id,
 };
+
+static __init int init_saa7127(void)
+{
+	return i2c_add_driver(&saa7127_driver);
+}
+
+static __exit void exit_saa7127(void)
+{
+	i2c_del_driver(&saa7127_driver);
+}
+
+module_init(init_saa7127);
+module_exit(exit_saa7127);

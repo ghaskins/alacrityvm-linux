@@ -495,7 +495,7 @@ static void catc_ctrl_run(struct catc *catc)
 	if (!q->dir && q->buf && q->len)
 		memcpy(catc->ctrl_buf, q->buf, q->len);
 
-	if ((status = usb_submit_urb(catc->ctrl_urb, GFP_KERNEL)))
+	if ((status = usb_submit_urb(catc->ctrl_urb, GFP_ATOMIC)))
 		err("submit(ctrl_urb) status %d", status);
 }
 
@@ -629,7 +629,7 @@ static void catc_multicast(unsigned char *addr, u8 *multicast)
 static void catc_set_multicast_list(struct net_device *netdev)
 {
 	struct catc *catc = netdev_priv(netdev);
-	struct dev_mc_list *mc;
+	struct netdev_hw_addr *ha;
 	u8 broadcast[6];
 	u8 rx = RxEnable | RxPolarity | RxMultiCast;
 
@@ -647,8 +647,8 @@ static void catc_set_multicast_list(struct net_device *netdev)
 	if (netdev->flags & IFF_ALLMULTI) {
 		memset(catc->multicast, 0xff, 64);
 	} else {
-		netdev_for_each_mc_addr(mc, netdev) {
-			u32 crc = ether_crc_le(6, mc->dmi_addr);
+		netdev_for_each_mc_addr(ha, netdev) {
+			u32 crc = ether_crc_le(6, ha->addr);
 			if (!catc->is_f5u011) {
 				catc->multicast[(crc >> 3) & 0x3f] |= 1 << (crc & 7);
 			} else {
@@ -686,7 +686,7 @@ static int catc_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 
 	cmd->supported = SUPPORTED_10baseT_Half | SUPPORTED_TP;
 	cmd->advertising = ADVERTISED_10baseT_Half | ADVERTISED_TP;
-	cmd->speed = SPEED_10;
+	ethtool_cmd_speed_set(cmd, SPEED_10);
 	cmd->duplex = DUPLEX_HALF;
 	cmd->port = PORT_TP; 
 	cmd->phy_address = 0;
@@ -749,7 +749,7 @@ static const struct net_device_ops catc_netdev_ops = {
 	.ndo_start_xmit		= catc_start_xmit,
 
 	.ndo_tx_timeout		= catc_tx_timeout,
-	.ndo_set_multicast_list = catc_set_multicast_list,
+	.ndo_set_rx_mode	= catc_set_multicast_list,
 	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,

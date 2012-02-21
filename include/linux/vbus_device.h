@@ -1,10 +1,11 @@
 /*
  * VBUS device models
  *
- * Copyright 2009 Novell.  All Rights Reserved.
+ * Copyright 2009 Novell, Gregory Haskins.  All Rights Reserved.
+ * Copyright 2012 Gregory Haskins <gregory.haskins@gmail.com>
  *
  * Author:
- *      Gregory Haskins <ghaskins@novell.com>
+ *      Gregory Haskins <gregory.haskins@gmail.com>
  *
  * This file deals primarily with the definitions for interfacing a virtual
  * device model to a virtual bus.  In a nutshell, a devclass begets a device,

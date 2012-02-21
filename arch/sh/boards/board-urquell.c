@@ -24,6 +24,7 @@
 #include <cpu/sh7786.h>
 #include <asm/heartbeat.h>
 #include <asm/sizes.h>
+#include <asm/smp-ops.h>
 
 /*
  * bit  1234 5678
@@ -189,7 +190,7 @@ static int urquell_clk_init(void)
 		return -EINVAL;
 
 	clk = clk_get(NULL, "extal");
-	if (!clk || IS_ERR(clk))
+	if (IS_ERR(clk))
 		return PTR_ERR(clk);
 	ret = clk_set_rate(clk, 33333333);
 	clk_put(clk);
@@ -203,6 +204,8 @@ static void __init urquell_setup(char **cmdline_p)
 	printk(KERN_INFO "Renesas Technology Corp. Urquell support.\n");
 
 	pm_power_off = urquell_power_off;
+
+	register_smp_ops(&shx3_smp_ops);
 }
 
 /*

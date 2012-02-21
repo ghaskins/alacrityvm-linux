@@ -29,6 +29,13 @@
 #include <linux/buffer_head.h>
 #include <linux/fs.h>
 
+/**
+ * nilfs_palloc_entries_per_group - get the number of entries per group
+ * @inode: inode of metadata file using this allocator
+ *
+ * The number of entries per group is defined by the number of bits
+ * that a bitmap block can maintain.
+ */
 static inline unsigned long
 nilfs_palloc_entries_per_group(const struct inode *inode)
 {
@@ -67,7 +74,7 @@ int nilfs_palloc_freev(struct inode *, __u64 *, size_t);
 
 #define nilfs_set_bit_atomic		ext2_set_bit_atomic
 #define nilfs_clear_bit_atomic		ext2_clear_bit_atomic
-#define nilfs_find_next_zero_bit	ext2_find_next_zero_bit
+#define nilfs_find_next_zero_bit	find_next_zero_bit_le
 
 /*
  * persistent object allocator cache

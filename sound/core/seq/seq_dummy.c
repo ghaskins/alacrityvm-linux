@@ -20,7 +20,7 @@
 
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/moduleparam.h>
+#include <linux/module.h>
 #include <sound/core.h>
 #include "seq_clientmgr.h"
 #include <sound/initval.h>
@@ -50,7 +50,7 @@
 
 	option snd-seq-dummy ports=4
 
-  The modle option "duplex=1" enables duplex operation to the port.
+  The model option "duplex=1" enables duplex operation to the port.
   In duplex mode, a pair of ports are created instead of single port,
   and events are tunneled between pair-ports.  For example, input to
   port A is sent to output port of another port B and vice versa.

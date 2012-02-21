@@ -1,7 +1,8 @@
 /*
  * venettap - A 802.x virtual network device based on the VBUS/IOQ interface
  *
- * Copyright (C) 2009 Novell, Gregory Haskins <ghaskins@novell.com>
+ * Copyright (C) 2009 Novell, Gregory Haskins
+ * Copyright (C) 2012 Gregory Haskins <gregory.haskins@gmail.com>
  *
  * Derived from the SNULL example from the book "Linux Device Drivers" by
  * Alessandro Rubini, Jonathan Corbet, and Greg Kroah-Hartman, published

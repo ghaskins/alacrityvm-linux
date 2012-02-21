@@ -60,7 +60,7 @@
 static int azfs_major, azfs_minor;
 
 struct axon_ram_bank {
-	struct of_device	*device;
+	struct platform_device	*device;
 	struct gendisk		*disk;
 	unsigned int		irq_id;
 	unsigned long		ph_addr;
@@ -72,7 +72,7 @@ struct axon_ram_bank {
 static ssize_t
 axon_ram_sysfs_ecc(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	struct of_device *device = to_of_device(dev);
+	struct platform_device *device = to_platform_device(dev);
 	struct axon_ram_bank *bank = device->dev.platform_data;
 
 	BUG_ON(!bank);
@@ -90,12 +90,12 @@ static DEVICE_ATTR(ecc, S_IRUGO, axon_ram_sysfs_ecc, NULL);
 static irqreturn_t
 axon_ram_irq_handler(int irq, void *dev)
 {
-	struct of_device *device = dev;
+	struct platform_device *device = dev;
 	struct axon_ram_bank *bank = device->dev.platform_data;
 
 	BUG_ON(!bank);
 
-	dev_err(&device->dev, "Correctable memory error occured\n");
+	dev_err(&device->dev, "Correctable memory error occurred\n");
 	bank->ecc_counter++;
 	return IRQ_HANDLED;
 }
@@ -104,7 +104,7 @@ axon_ram_irq_handler(int irq, void *dev)
  * axon_ram_make_request - make_request() method for block device
  * @queue, @bio: see blk_queue_make_request()
  */
-static int
+static void
 axon_ram_make_request(struct request_queue *queue, struct bio *bio)
 {
 	struct axon_ram_bank *bank = bio->bi_bdev->bd_disk->private_data;
@@ -113,7 +113,6 @@ axon_ram_make_request(struct request_queue *queue, struct bio *bio)
 	struct bio_vec *vec;
 	unsigned int transfered;
 	unsigned short idx;
-	int rc = 0;
 
 	phys_mem = bank->io_addr + (bio->bi_sector << AXON_RAM_SECTOR_SHIFT);
 	phys_end = bank->io_addr + bank->size;
@@ -121,8 +120,7 @@ axon_ram_make_request(struct request_queue *queue, struct bio *bio)
 	bio_for_each_segment(vec, bio, idx) {
 		if (unlikely(phys_mem + vec->bv_len > phys_end)) {
 			bio_io_error(bio);
-			rc = -ERANGE;
-			break;
+			return;
 		}
 
 		user_mem = page_address(vec->bv_page) + vec->bv_offset;
@@ -135,8 +133,6 @@ axon_ram_make_request(struct request_queue *queue, struct bio *bio)
 		transfered += vec->bv_len;
 	}
 	bio_endio(bio, 0);
-
-	return rc;
 }
 
 /**
@@ -172,10 +168,9 @@ static const struct block_device_operations axon_ram_devops = {
 
 /**
  * axon_ram_probe - probe() method for platform driver
- * @device, @device_id: see of_platform_driver method
+ * @device: see platform_driver method
  */
-static int
-axon_ram_probe(struct of_device *device, const struct of_device_id *device_id)
+static int axon_ram_probe(struct platform_device *device)
 {
 	static int axon_ram_bank_id = -1;
 	struct axon_ram_bank *bank;
@@ -185,7 +180,7 @@ axon_ram_probe(struct of_device *device, const struct of_device_id *device_id)
 	axon_ram_bank_id++;
 
 	dev_info(&device->dev, "Found memory controller on %s\n",
-			device->node->full_name);
+			device->dev.of_node->full_name);
 
 	bank = kzalloc(sizeof(struct axon_ram_bank), GFP_KERNEL);
 	if (bank == NULL) {
@@ -198,13 +193,13 @@ axon_ram_probe(struct of_device *device, const struct of_device_id *device_id)
 
 	bank->device = device;
 
-	if (of_address_to_resource(device->node, 0, &resource) != 0) {
+	if (of_address_to_resource(device->dev.of_node, 0, &resource) != 0) {
 		dev_err(&device->dev, "Cannot access device tree\n");
 		rc = -EFAULT;
 		goto failed;
 	}
 
-	bank->size = resource.end - resource.start + 1;
+	bank->size = resource_size(&resource);
 
 	if (bank->size == 0) {
 		dev_err(&device->dev, "No DDR2 memory found for %s%d\n",
@@ -217,7 +212,7 @@ axon_ram_probe(struct of_device *device, const struct of_device_id *device_id)
 			AXON_RAM_DEVICE_NAME, axon_ram_bank_id, bank->size >> 20);
 
 	bank->ph_addr = resource.start;
-	bank->io_addr = (unsigned long) ioremap_flags(
+	bank->io_addr = (unsigned long) ioremap_prot(
 			bank->ph_addr, bank->size, _PAGE_NO_CACHE);
 	if (bank->io_addr == 0) {
 		dev_err(&device->dev, "ioremap() failed\n");
@@ -253,7 +248,7 @@ axon_ram_probe(struct of_device *device, const struct of_device_id *device_id)
 	blk_queue_logical_block_size(bank->disk->queue, AXON_RAM_SECTOR_SIZE);
 	add_disk(bank->disk);
 
-	bank->irq_id = irq_of_parse_and_map(device->node, 0);
+	bank->irq_id = irq_of_parse_and_map(device->dev.of_node, 0);
 	if (bank->irq_id == NO_IRQ) {
 		dev_err(&device->dev, "Cannot access ECC interrupt ID\n");
 		rc = -EFAULT;
@@ -304,7 +299,7 @@ failed:
  * @device: see of_platform_driver method
  */
 static int
-axon_ram_remove(struct of_device *device)
+axon_ram_remove(struct platform_device *device)
 {
 	struct axon_ram_bank *bank = device->dev.platform_data;
 
@@ -326,13 +321,13 @@ static struct of_device_id axon_ram_device_id[] = {
 	{}
 };
 
-static struct of_platform_driver axon_ram_driver = {
-	.match_table	= axon_ram_device_id,
+static struct platform_driver axon_ram_driver = {
 	.probe		= axon_ram_probe,
 	.remove		= axon_ram_remove,
-	.driver		= {
-		.owner	= THIS_MODULE,
-		.name	= AXON_RAM_MODULE_NAME,
+	.driver = {
+		.name = AXON_RAM_MODULE_NAME,
+		.owner = THIS_MODULE,
+		.of_match_table = axon_ram_device_id,
 	},
 };
 
@@ -350,7 +345,7 @@ axon_ram_init(void)
 	}
 	azfs_minor = 0;
 
-	return of_register_platform_driver(&axon_ram_driver);
+	return platform_driver_register(&axon_ram_driver);
 }
 
 /**
@@ -359,7 +354,7 @@ axon_ram_init(void)
 static void __exit
 axon_ram_exit(void)
 {
-	of_unregister_platform_driver(&axon_ram_driver);
+	platform_driver_unregister(&axon_ram_driver);
 	unregister_blkdev(azfs_major, AXON_RAM_DEVICE_NAME);
 }
 

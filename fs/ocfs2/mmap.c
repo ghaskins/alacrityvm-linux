@@ -31,7 +31,6 @@
 #include <linux/signal.h>
 #include <linux/rbtree.h>
 
-#define MLOG_MASK_PREFIX ML_FILE_IO
 #include <cluster/masklog.h>
 
 #include "ocfs2.h"
@@ -41,52 +40,29 @@
 #include "file.h"
 #include "inode.h"
 #include "mmap.h"
+#include "super.h"
+#include "ocfs2_trace.h"
 
-static inline int ocfs2_vm_op_block_sigs(sigset_t *blocked, sigset_t *oldset)
-{
-	/* The best way to deal with signals in the vm path is
-	 * to block them upfront, rather than allowing the
-	 * locking paths to return -ERESTARTSYS. */
-	sigfillset(blocked);
-
-	/* We should technically never get a bad return value
-	 * from sigprocmask */
-	return sigprocmask(SIG_BLOCK, blocked, oldset);
-}
-
-static inline int ocfs2_vm_op_unblock_sigs(sigset_t *oldset)
-{
-	return sigprocmask(SIG_SETMASK, oldset, NULL);
-}
 
 static int ocfs2_fault(struct vm_area_struct *area, struct vm_fault *vmf)
 {
-	sigset_t blocked, oldset;
-	int error, ret;
+	sigset_t oldset;
+	int ret;
 
-	mlog_entry("(area=%p, page offset=%lu)\n", area, vmf->pgoff);
-
-	error = ocfs2_vm_op_block_sigs(&blocked, &oldset);
-	if (error < 0) {
-		mlog_errno(error);
-		ret = VM_FAULT_SIGBUS;
-		goto out;
-	}
-
+	ocfs2_block_signals(&oldset);
 	ret = filemap_fault(area, vmf);
+	ocfs2_unblock_signals(&oldset);
 
-	error = ocfs2_vm_op_unblock_sigs(&oldset);
-	if (error < 0)
-		mlog_errno(error);
-out:
-	mlog_exit_ptr(vmf->page);
+	trace_ocfs2_fault(OCFS2_I(area->vm_file->f_mapping->host)->ip_blkno,
+			  area, vmf->page, vmf->pgoff);
 	return ret;
 }
 
-static int __ocfs2_page_mkwrite(struct inode *inode, struct buffer_head *di_bh,
+static int __ocfs2_page_mkwrite(struct file *file, struct buffer_head *di_bh,
 				struct page *page)
 {
-	int ret;
+	int ret = VM_FAULT_NOPAGE;
+	struct inode *inode = file->f_path.dentry->d_inode;
 	struct address_space *mapping = inode->i_mapping;
 	loff_t pos = page_offset(page);
 	unsigned int len = PAGE_CACHE_SIZE;
@@ -95,30 +71,25 @@ static int __ocfs2_page_mkwrite(struct inode *inode, struct buffer_head *di_bh,
 	void *fsdata;
 	loff_t size = i_size_read(inode);
 
-	/*
-	 * Another node might have truncated while we were waiting on
-	 * cluster locks.
-	 */
-	last_index = size >> PAGE_CACHE_SHIFT;
-	if (page->index > last_index) {
-		ret = -EINVAL;
-		goto out;
-	}
+	last_index = (size - 1) >> PAGE_CACHE_SHIFT;
 
 	/*
-	 * The i_size check above doesn't catch the case where nodes
-	 * truncated and then re-extended the file. We'll re-check the
-	 * page mapping after taking the page lock inside of
-	 * ocfs2_write_begin_nolock().
+	 * There are cases that lead to the page no longer bebongs to the
+	 * mapping.
+	 * 1) pagecache truncates locally due to memory pressure.
+	 * 2) pagecache truncates when another is taking EX lock against 
+	 * inode lock. see ocfs2_data_convert_worker.
+	 * 
+	 * The i_size check doesn't catch the case where nodes truncated and
+	 * then re-extended the file. We'll re-check the page mapping after
+	 * taking the page lock inside of ocfs2_write_begin_nolock().
+	 *
+	 * Let VM retry with these cases.
 	 */
-	if (!PageUptodate(page) || page->mapping != inode->i_mapping) {
-		/*
-		 * the page has been umapped in ocfs2_data_downconvert_worker.
-		 * So return 0 here and let VFS retry.
-		 */
-		ret = 0;
+	if ((page->mapping != inode->i_mapping) ||
+	    (!PageUptodate(page)) ||
+	    (page_offset(page) >= size))
 		goto out;
-	}
 
 	/*
 	 * Call ocfs2_write_begin() and ocfs2_write_end() to take
@@ -131,24 +102,28 @@ static int __ocfs2_page_mkwrite(struct inode *inode, struct buffer_head *di_bh,
 	 * because the "write" would invalidate their data.
 	 */
 	if (page->index == last_index)
-		len = size & ~PAGE_CACHE_MASK;
+		len = ((size - 1) & ~PAGE_CACHE_MASK) + 1;
 
-	ret = ocfs2_write_begin_nolock(mapping, pos, len, 0, &locked_page,
+	ret = ocfs2_write_begin_nolock(file, mapping, pos, len, 0, &locked_page,
 				       &fsdata, di_bh, page);
 	if (ret) {
 		if (ret != -ENOSPC)
 			mlog_errno(ret);
+		if (ret == -ENOMEM)
+			ret = VM_FAULT_OOM;
+		else
+			ret = VM_FAULT_SIGBUS;
 		goto out;
 	}
 
-	ret = ocfs2_write_end_nolock(mapping, pos, len, len, locked_page,
-				     fsdata);
-	if (ret < 0) {
-		mlog_errno(ret);
+	if (!locked_page) {
+		ret = VM_FAULT_NOPAGE;
 		goto out;
 	}
+	ret = ocfs2_write_end_nolock(mapping, pos, len, len, locked_page,
+				     fsdata);
 	BUG_ON(ret != len);
-	ret = 0;
+	ret = VM_FAULT_LOCKED;
 out:
 	return ret;
 }
@@ -158,14 +133,10 @@ static int ocfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	struct page *page = vmf->page;
 	struct inode *inode = vma->vm_file->f_path.dentry->d_inode;
 	struct buffer_head *di_bh = NULL;
-	sigset_t blocked, oldset;
-	int ret, ret2;
+	sigset_t oldset;
+	int ret;
 
-	ret = ocfs2_vm_op_block_sigs(&blocked, &oldset);
-	if (ret < 0) {
-		mlog_errno(ret);
-		return ret;
-	}
+	ocfs2_block_signals(&oldset);
 
 	/*
 	 * The cluster locks taken will block a truncate from another
@@ -185,7 +156,7 @@ static int ocfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	 */
 	down_write(&OCFS2_I(inode)->ip_alloc_sem);
 
-	ret = __ocfs2_page_mkwrite(inode, di_bh, page);
+	ret = __ocfs2_page_mkwrite(vma->vm_file, di_bh, page);
 
 	up_write(&OCFS2_I(inode)->ip_alloc_sem);
 
@@ -193,11 +164,7 @@ static int ocfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	ocfs2_inode_unlock(inode, 1);
 
 out:
-	ret2 = ocfs2_vm_op_unblock_sigs(&oldset);
-	if (ret2 < 0)
-		mlog_errno(ret2);
-	if (ret)
-		ret = VM_FAULT_SIGBUS;
+	ocfs2_unblock_signals(&oldset);
 	return ret;
 }
 

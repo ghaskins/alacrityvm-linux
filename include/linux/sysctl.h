@@ -435,7 +435,7 @@ enum {
 	NET_IPV4_ROUTE_MAX_SIZE=5,
 	NET_IPV4_ROUTE_GC_MIN_INTERVAL=6,
 	NET_IPV4_ROUTE_GC_TIMEOUT=7,
-	NET_IPV4_ROUTE_GC_INTERVAL=8,
+	NET_IPV4_ROUTE_GC_INTERVAL=8, /* obsolete since 2.6.38 */
 	NET_IPV4_ROUTE_REDIRECT_LOAD=9,
 	NET_IPV4_ROUTE_REDIRECT_NUMBER=10,
 	NET_IPV4_ROUTE_REDIRECT_SILENCE=11,
@@ -930,6 +930,8 @@ enum
 
 #ifdef __KERNEL__
 #include <linux/list.h>
+#include <linux/rcupdate.h>
+#include <linux/wait.h>
 
 /* For the /proc/sys support */
 struct ctl_table;
@@ -980,6 +982,8 @@ extern int proc_doulongvec_minmax(struct ctl_table *, int,
 				  void __user *, size_t *, loff_t *);
 extern int proc_doulongvec_ms_jiffies_minmax(struct ctl_table *table, int,
 				      void __user *, size_t *, loff_t *);
+extern int proc_do_large_bitmap(struct ctl_table *, int,
+				void __user *, size_t *, loff_t *);
 
 /*
  * Register a set of sysctl names by calling register_sysctl_table
@@ -1008,6 +1012,26 @@ extern int proc_doulongvec_ms_jiffies_minmax(struct ctl_table *table, int,
  * cover common cases.
  */
 
+/* Support for userspace poll() to watch for changes */
+struct ctl_table_poll {
+	atomic_t event;
+	wait_queue_head_t wait;
+};
+
+static inline void *proc_sys_poll_event(struct ctl_table_poll *poll)
+{
+	return (void *)(unsigned long)atomic_read(&poll->event);
+}
+
+void proc_sys_poll_notify(struct ctl_table_poll *poll);
+
+#define __CTL_TABLE_POLL_INITIALIZER(name) {				\
+	.event = ATOMIC_INIT(0),					\
+	.wait = __WAIT_QUEUE_HEAD_INITIALIZER(name.wait) }
+
+#define DEFINE_CTL_TABLE_POLL(name)					\
+	struct ctl_table_poll name = __CTL_TABLE_POLL_INITIALIZER(name)
+
 /* A sysctl table is an array of struct ctl_table: */
 struct ctl_table 
 {
@@ -1018,6 +1042,7 @@ struct ctl_table
 	struct ctl_table *child;
 	struct ctl_table *parent;	/* Automatically set */
 	proc_handler *proc_handler;	/* Callback for text formatting */
+	struct ctl_table_poll *poll;
 	void *extra1;
 	void *extra2;
 };
@@ -1035,10 +1060,15 @@ struct ctl_table_root {
    struct ctl_table trees. */
 struct ctl_table_header
 {
-	struct ctl_table *ctl_table;
-	struct list_head ctl_entry;
-	int used;
-	int count;
+	union {
+		struct {
+			struct ctl_table *ctl_table;
+			struct list_head ctl_entry;
+			int used;
+			int count;
+		};
+		struct rcu_head rcu;
+	};
 	struct completion *unregistering;
 	struct ctl_table *ctl_table_arg;
 	struct ctl_table_root *root;

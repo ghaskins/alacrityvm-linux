@@ -18,6 +18,7 @@
 #include <linux/list.h>
 #include <linux/errno.h>
 #include <linux/err.h>
+#include <linux/module.h>
 #include <linux/string.h>
 #include <linux/clk.h>
 #include <linux/mutex.h>
@@ -57,7 +58,7 @@ static struct clk *mpc5121_clk_get(struct device *dev, const char *id)
 	int id_match = 0;
 
 	if (dev == NULL || id == NULL)
-		return NULL;
+		return clk;
 
 	mutex_lock(&clocks_mutex);
 	list_for_each_entry(p, &clocks, node) {
@@ -292,6 +293,15 @@ static void diu_clk_calc(struct clk *clk)
 	clk->rate = rate;
 }
 
+static void viu_clk_calc(struct clk *clk)
+{
+	unsigned long rate;
+
+	rate = sys_clk.rate;
+	rate /= 2;
+	clk->rate = rate;
+}
+
 static void half_clk_calc(struct clk *clk)
 {
 	clk->rate = clk->parent->rate / 2;
@@ -410,6 +420,14 @@ static struct clk diu_clk = {
 	.reg = 1,
 	.bit = 31,
 	.calc = diu_clk_calc,
+};
+
+static struct clk viu_clk = {
+	.name = "viu_clk",
+	.flags = CLK_HAS_CTRL,
+	.reg = 1,
+	.bit = 18,
+	.calc = viu_clk_calc,
 };
 
 static struct clk axe_clk = {
@@ -535,6 +553,7 @@ struct clk *rate_clks[] = {
 	&ref_clk,
 	&sys_clk,
 	&diu_clk,
+	&viu_clk,
 	&csb_clk,
 	&e300_clk,
 	&ips_clk,
@@ -660,7 +679,7 @@ static void psc_clks_init(void)
 {
 	struct device_node *np;
 	const u32 *cell_index;
-	struct of_device *ofdev;
+	struct platform_device *ofdev;
 
 	for_each_compatible_node(np, NULL, "fsl,mpc5121-psc") {
 		cell_index = of_get_property(np, "cell-index", NULL);

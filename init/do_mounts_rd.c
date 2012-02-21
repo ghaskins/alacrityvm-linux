@@ -64,7 +64,7 @@ identify_ramdisk_image(int fd, int start_block, decompress_fn *decompressor)
 
 	buf = kmalloc(size, GFP_KERNEL);
 	if (!buf)
-		return -1;
+		return -ENOMEM;
 
 	minixsb = (struct minix_super_block *) buf;
 	ext2sb = (struct ext2_super_block *) buf;
@@ -120,6 +120,20 @@ identify_ramdisk_image(int fd, int start_block, decompress_fn *decompressor)
 	}
 
 	/*
+	 * Read 512 bytes further to check if cramfs is padded
+	 */
+	sys_lseek(fd, start_block * BLOCK_SIZE + 0x200, 0);
+	sys_read(fd, buf, size);
+
+	if (cramfsb->magic == CRAMFS_MAGIC) {
+		printk(KERN_NOTICE
+		       "RAMDISK: cramfs filesystem found at block %d\n",
+		       start_block);
+		nblocks = (cramfsb->size + BLOCK_SIZE - 1) >> BLOCK_SIZE_BITS;
+		goto done;
+	}
+
+	/*
 	 * Read block 1 to test for minix and ext2 superblock
 	 */
 	sys_lseek(fd, (start_block+1) * BLOCK_SIZE, 0);
@@ -168,7 +182,7 @@ int __init rd_load_image(char *from)
 	char rotator[4] = { '|' , '/' , '-' , '\\' };
 #endif
 
-	out_fd = sys_open("/dev/ram", O_RDWR, 0);
+	out_fd = sys_open((const char __user __force *) "/dev/ram", O_RDWR, 0);
 	if (out_fd < 0)
 		goto out;
 
@@ -267,7 +281,7 @@ noclose_input:
 	sys_close(out_fd);
 out:
 	kfree(buf);
-	sys_unlink("/dev/ram");
+	sys_unlink((const char __user __force *) "/dev/ram");
 	return res;
 }
 

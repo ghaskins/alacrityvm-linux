@@ -15,12 +15,15 @@
 #include <linux/i2c.h>
 #include <linux/irq.h>
 #include <linux/clk.h>
+#include <linux/clkdev.h>
 #include <mach/fpga.h>
 #include <mach/irq.h>
 #include <asm/machvec.h>
 #include <asm/heartbeat.h>
 #include <asm/sizes.h>
+#include <asm/clock.h>
 #include <asm/reboot.h>
+#include <asm/smp-ops.h>
 
 static struct resource heartbeat_resource = {
 	.start		= 0x07fff8b0,
@@ -132,12 +135,51 @@ static int __init sdk7786_devices_setup(void)
 
 	return sdk7786_i2c_setup();
 }
-__initcall(sdk7786_devices_setup);
+device_initcall(sdk7786_devices_setup);
 
 static int sdk7786_mode_pins(void)
 {
 	return fpga_read_reg(MODSWR);
 }
+
+/*
+ * FPGA-driven PCIe clocks
+ *
+ * Historically these include the oscillator, clock B (slots 2/3/4) and
+ * clock A (slot 1 and the CPU clock). Newer revs of the PCB shove
+ * everything under a single PCIe clocks enable bit that happens to map
+ * to the same bit position as the oscillator bit for earlier FPGA
+ * versions.
+ *
+ * Given that the legacy clocks have the side-effect of shutting the CPU
+ * off through the FPGA along with the PCI slots, we simply leave them in
+ * their initial state and don't bother registering them with the clock
+ * framework.
+ */
+static int sdk7786_pcie_clk_enable(struct clk *clk)
+{
+	fpga_write_reg(fpga_read_reg(PCIECR) | PCIECR_CLKEN, PCIECR);
+	return 0;
+}
+
+static void sdk7786_pcie_clk_disable(struct clk *clk)
+{
+	fpga_write_reg(fpga_read_reg(PCIECR) & ~PCIECR_CLKEN, PCIECR);
+}
+
+static struct clk_ops sdk7786_pcie_clk_ops = {
+	.enable		= sdk7786_pcie_clk_enable,
+	.disable	= sdk7786_pcie_clk_disable,
+};
+
+static struct clk sdk7786_pcie_clk = {
+	.ops		= &sdk7786_pcie_clk_ops,
+};
+
+static struct clk_lookup sdk7786_pcie_cl = {
+	.con_id		= "pcie_plat_clk",
+	.clk		= &sdk7786_pcie_clk,
+};
 
 static int sdk7786_clk_init(void)
 {
@@ -152,17 +194,41 @@ static int sdk7786_clk_init(void)
 		return -EINVAL;
 
 	clk = clk_get(NULL, "extal");
-	if (!clk || IS_ERR(clk))
+	if (IS_ERR(clk))
 		return PTR_ERR(clk);
 	ret = clk_set_rate(clk, 33333333);
 	clk_put(clk);
 
-	return ret;
+	/*
+	 * Setup the FPGA clocks.
+	 */
+	ret = clk_register(&sdk7786_pcie_clk);
+	if (unlikely(ret)) {
+		pr_err("FPGA clock registration failed\n");
+		return ret;
+	}
+
+	clkdev_add(&sdk7786_pcie_cl);
+
+	return 0;
 }
 
 static void sdk7786_restart(char *cmd)
 {
 	fpga_write_reg(0xa5a5, SRSTR);
+}
+
+static void sdk7786_power_off(void)
+{
+	fpga_write_reg(fpga_read_reg(PWRCR) | PWRCR_PDWNREQ, PWRCR);
+
+	/*
+	 * It can take up to 20us for the R8C to do its job, back off and
+	 * wait a bit until we've been shut off. Even though newer FPGA
+	 * versions don't set the ACK bit, the latency issue remains.
+	 */
+	while ((fpga_read_reg(PWRCR) & PWRCR_PDWNACK) == 0)
+		cpu_sleep();
 }
 
 /* Initialize the board */
@@ -171,10 +237,14 @@ static void __init sdk7786_setup(char **cmdline_p)
 	pr_info("Renesas Technology Europe SDK7786 support:\n");
 
 	sdk7786_fpga_init();
+	sdk7786_nmi_init();
 
 	pr_info("\tPCB revision:\t%d\n", fpga_read_reg(PCBRR) & 0xf);
 
 	machine_ops.restart = sdk7786_restart;
+	pm_power_off = sdk7786_power_off;
+
+	register_smp_ops(&shx3_smp_ops);
 }
 
 /*

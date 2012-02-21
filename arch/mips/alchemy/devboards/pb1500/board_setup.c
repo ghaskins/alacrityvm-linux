@@ -33,21 +33,9 @@
 
 #include <prom.h>
 
-
-char irq_tab_alchemy[][5] __initdata = {
-	[12] = { -1, AU1500_PCI_INTA, 0xff, 0xff, 0xff },   /* IDSEL 12 - HPT370	*/
-	[13] = { -1, AU1500_PCI_INTA, AU1500_PCI_INTB, AU1500_PCI_INTC, AU1500_PCI_INTD },   /* IDSEL 13 - PCI slot */
-};
-
-
 const char *get_system_type(void)
 {
 	return "Alchemy Pb1500";
-}
-
-void board_reset(void)
-{
-	bcsr_write(BCSR_SYSTEM, 0);
 }
 
 void __init board_setup(void)
@@ -61,7 +49,7 @@ void __init board_setup(void)
 	sys_clksrc = sys_freqctrl = pin_func = 0;
 	/* Set AUX clock to 12 MHz * 8 = 96 MHz */
 	au_writel(8, SYS_AUXPLL);
-	au_writel(0, SYS_PINSTATERD);
+	alchemy_gpio1_input_enable();
 	udelay(100);
 
 	/* GPIO201 is input for PCMCIA card detect */
@@ -106,20 +94,18 @@ void __init board_setup(void)
 #endif /* defined(CONFIG_USB_OHCI_HCD) || defined(CONFIG_USB_OHCI_HCD_MODULE) */
 
 #ifdef CONFIG_PCI
-	/* Setup PCI bus controller */
-	au_writel(0, Au1500_PCI_CMEM);
-	au_writel(0x00003fff, Au1500_CFG_BASE);
-#if defined(__MIPSEB__)
-	au_writel(0xf | (2 << 6) | (1 << 4), Au1500_PCI_CFG);
-#else
-	au_writel(0xf, Au1500_PCI_CFG);
-#endif
-	au_writel(0xf0000000, Au1500_PCI_MWMASK_DEV);
-	au_writel(0, Au1500_PCI_MWBASE_REV_CCL);
-	au_writel(0x02a00356, Au1500_PCI_STATCMD);
-	au_writel(0x00003c04, Au1500_PCI_HDRTYPE);
-	au_writel(0x00000008, Au1500_PCI_MBAR);
-	au_sync();
+	{
+		void __iomem *base =
+				(void __iomem *)KSEG1ADDR(AU1500_PCI_PHYS_ADDR);
+		/* Setup PCI bus controller */
+		__raw_writel(0x00003fff, base + PCI_REG_CMEM);
+		__raw_writel(0xf0000000, base + PCI_REG_MWMASK_DEV);
+		__raw_writel(0, base + PCI_REG_MWBASE_REV_CCL);
+		__raw_writel(0x02a00356, base + PCI_REG_STATCMD);
+		__raw_writel(0x00003c04, base + PCI_REG_PARAM);
+		__raw_writel(0x00000008, base + PCI_REG_MBAR);
+		wmb();
+	}
 #endif
 
 	/* Enable sys bus clock divider when IDLE state or no bus activity. */
@@ -139,14 +125,14 @@ void __init board_setup(void)
 
 static int __init pb1500_init_irq(void)
 {
-	set_irq_type(AU1500_GPIO9_INT, IRQF_TRIGGER_LOW);   /* CD0# */
-	set_irq_type(AU1500_GPIO10_INT, IRQF_TRIGGER_LOW);  /* CARD0 */
-	set_irq_type(AU1500_GPIO11_INT, IRQF_TRIGGER_LOW);  /* STSCHG0# */
-	set_irq_type(AU1500_GPIO204_INT, IRQF_TRIGGER_HIGH);
-	set_irq_type(AU1500_GPIO201_INT, IRQF_TRIGGER_LOW);
-	set_irq_type(AU1500_GPIO202_INT, IRQF_TRIGGER_LOW);
-	set_irq_type(AU1500_GPIO203_INT, IRQF_TRIGGER_LOW);
-	set_irq_type(AU1500_GPIO205_INT, IRQF_TRIGGER_LOW);
+	irq_set_irq_type(AU1500_GPIO9_INT, IRQF_TRIGGER_LOW);   /* CD0# */
+	irq_set_irq_type(AU1500_GPIO10_INT, IRQF_TRIGGER_LOW);  /* CARD0 */
+	irq_set_irq_type(AU1500_GPIO11_INT, IRQF_TRIGGER_LOW);  /* STSCHG0# */
+	irq_set_irq_type(AU1500_GPIO204_INT, IRQF_TRIGGER_HIGH);
+	irq_set_irq_type(AU1500_GPIO201_INT, IRQF_TRIGGER_LOW);
+	irq_set_irq_type(AU1500_GPIO202_INT, IRQF_TRIGGER_LOW);
+	irq_set_irq_type(AU1500_GPIO203_INT, IRQF_TRIGGER_LOW);
+	irq_set_irq_type(AU1500_GPIO205_INT, IRQF_TRIGGER_LOW);
 
 	return 0;
 }

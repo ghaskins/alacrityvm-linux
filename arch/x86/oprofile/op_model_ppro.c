@@ -28,21 +28,44 @@ static int counter_width = 32;
 
 #define MSR_PPRO_EVENTSEL_RESERVED	((0xFFFFFFFFULL<<32)|(1ULL<<21))
 
-static u64 *reset_value;
+static u64 reset_value[OP_MAX_COUNTER];
 
-static void ppro_fill_in_addresses(struct op_msrs * const msrs)
+static void ppro_shutdown(struct op_msrs const * const msrs)
+{
+	int i;
+
+	for (i = 0; i < num_counters; ++i) {
+		if (!msrs->counters[i].addr)
+			continue;
+		release_perfctr_nmi(MSR_P6_PERFCTR0 + i);
+		release_evntsel_nmi(MSR_P6_EVNTSEL0 + i);
+	}
+}
+
+static int ppro_fill_in_addresses(struct op_msrs * const msrs)
 {
 	int i;
 
 	for (i = 0; i < num_counters; i++) {
-		if (reserve_perfctr_nmi(MSR_P6_PERFCTR0 + i))
-			msrs->counters[i].addr = MSR_P6_PERFCTR0 + i;
+		if (!reserve_perfctr_nmi(MSR_P6_PERFCTR0 + i))
+			goto fail;
+		if (!reserve_evntsel_nmi(MSR_P6_EVNTSEL0 + i)) {
+			release_perfctr_nmi(MSR_P6_PERFCTR0 + i);
+			goto fail;
+		}
+		/* both registers must be reserved */
+		msrs->counters[i].addr = MSR_P6_PERFCTR0 + i;
+		msrs->controls[i].addr = MSR_P6_EVNTSEL0 + i;
+		continue;
+	fail:
+		if (!counter_config[i].enabled)
+			continue;
+		op_x86_warn_reserved(i);
+		ppro_shutdown(msrs);
+		return -EBUSY;
 	}
 
-	for (i = 0; i < num_counters; i++) {
-		if (reserve_evntsel_nmi(MSR_P6_EVNTSEL0 + i))
-			msrs->controls[i].addr = MSR_P6_EVNTSEL0 + i;
-	}
+	return 0;
 }
 
 
@@ -51,13 +74,6 @@ static void ppro_setup_ctrs(struct op_x86_model_spec const *model,
 {
 	u64 val;
 	int i;
-
-	if (!reset_value) {
-		reset_value = kzalloc(sizeof(reset_value[0]) * num_counters,
-					GFP_ATOMIC);
-		if (!reset_value)
-			return;
-	}
 
 	if (cpu_has_arch_perfmon) {
 		union cpuid10_eax eax;
@@ -68,8 +84,8 @@ static void ppro_setup_ctrs(struct op_x86_model_spec const *model,
 		 * counter width:
 		 */
 		if (!(eax.split.version_id == 0 &&
-			current_cpu_data.x86 == 6 &&
-				current_cpu_data.x86_model == 15)) {
+			__this_cpu_read(cpu_info.x86) == 6 &&
+				__this_cpu_read(cpu_info.x86_model) == 15)) {
 
 			if (counter_width < eax.split.bit_width)
 				counter_width = eax.split.bit_width;
@@ -78,26 +94,17 @@ static void ppro_setup_ctrs(struct op_x86_model_spec const *model,
 
 	/* clear all counters */
 	for (i = 0; i < num_counters; ++i) {
-		if (unlikely(!msrs->controls[i].addr)) {
-			if (counter_config[i].enabled && !smp_processor_id())
-				/*
-				 * counter is reserved, this is on all
-				 * cpus, so report only for cpu #0
-				 */
-				op_x86_warn_reserved(i);
+		if (!msrs->controls[i].addr)
 			continue;
-		}
 		rdmsrl(msrs->controls[i].addr, val);
 		if (val & ARCH_PERFMON_EVENTSEL_ENABLE)
 			op_x86_warn_in_use(i);
 		val &= model->reserved;
 		wrmsrl(msrs->controls[i].addr, val);
-	}
-
-	/* avoid a false detection of ctr overflows in NMI handler */
-	for (i = 0; i < num_counters; ++i) {
-		if (unlikely(!msrs->counters[i].addr))
-			continue;
+		/*
+		 * avoid a false detection of ctr overflows in NMI *
+		 * handler
+		 */
 		wrmsrl(msrs->counters[i].addr, -1LL);
 	}
 
@@ -123,13 +130,6 @@ static int ppro_check_ctrs(struct pt_regs * const regs,
 	u64 val;
 	int i;
 
-	/*
-	 * This can happen if perf counters are in use when
-	 * we steal the die notifier NMI.
-	 */
-	if (unlikely(!reset_value))
-		goto out;
-
 	for (i = 0; i < num_counters; ++i) {
 		if (!reset_value[i])
 			continue;
@@ -140,7 +140,6 @@ static int ppro_check_ctrs(struct pt_regs * const regs,
 		wrmsrl(msrs->counters[i].addr, -reset_value[i]);
 	}
 
-out:
 	/* Only P6 based Pentium M need to re-unmask the apic vector but it
 	 * doesn't hurt other P6 variant */
 	apic_write(APIC_LVTPC, apic_read(APIC_LVTPC) & ~APIC_LVT_MASKED);
@@ -161,8 +160,6 @@ static void ppro_start(struct op_msrs const * const msrs)
 	u64 val;
 	int i;
 
-	if (!reset_value)
-		return;
 	for (i = 0; i < num_counters; ++i) {
 		if (reset_value[i]) {
 			rdmsrl(msrs->controls[i].addr, val);
@@ -178,8 +175,6 @@ static void ppro_stop(struct op_msrs const * const msrs)
 	u64 val;
 	int i;
 
-	if (!reset_value)
-		return;
 	for (i = 0; i < num_counters; ++i) {
 		if (!reset_value[i])
 			continue;
@@ -188,25 +183,6 @@ static void ppro_stop(struct op_msrs const * const msrs)
 		wrmsrl(msrs->controls[i].addr, val);
 	}
 }
-
-static void ppro_shutdown(struct op_msrs const * const msrs)
-{
-	int i;
-
-	for (i = 0; i < num_counters; ++i) {
-		if (msrs->counters[i].addr)
-			release_perfctr_nmi(MSR_P6_PERFCTR0 + i);
-	}
-	for (i = 0; i < num_counters; ++i) {
-		if (msrs->controls[i].addr)
-			release_evntsel_nmi(MSR_P6_EVNTSEL0 + i);
-	}
-	if (reset_value) {
-		kfree(reset_value);
-		reset_value = NULL;
-	}
-}
-
 
 struct op_x86_model_spec op_ppro_spec = {
 	.num_counters		= 2,
@@ -236,14 +212,14 @@ static void arch_perfmon_setup_counters(void)
 	eax.full = cpuid_eax(0xa);
 
 	/* Workaround for BIOS bugs in 6/15. Taken from perfmon2 */
-	if (eax.split.version_id == 0 && current_cpu_data.x86 == 6 &&
-		current_cpu_data.x86_model == 15) {
+	if (eax.split.version_id == 0 && __this_cpu_read(cpu_info.x86) == 6 &&
+		__this_cpu_read(cpu_info.x86_model) == 15) {
 		eax.split.version_id = 2;
-		eax.split.num_events = 2;
+		eax.split.num_counters = 2;
 		eax.split.bit_width = 40;
 	}
 
-	num_counters = eax.split.num_events;
+	num_counters = min((int)eax.split.num_counters, OP_MAX_COUNTER);
 
 	op_arch_perfmon_spec.num_counters = num_counters;
 	op_arch_perfmon_spec.num_controls = num_counters;

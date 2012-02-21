@@ -59,7 +59,7 @@
  */
 static int orinoco_tmd_cor_reset(struct orinoco_private *priv)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	struct orinoco_pci_card *card = priv->card;
 	unsigned long timeout;
 	u16 reg;
@@ -156,7 +156,7 @@ static int orinoco_tmd_init_one(struct pci_dev *pdev,
 		goto fail;
 	}
 
-	err = orinoco_if_add(priv, 0, 0);
+	err = orinoco_if_add(priv, 0, 0, NULL);
 	if (err) {
 		printk(KERN_ERR PFX "orinoco_if_add() failed\n");
 		goto fail;

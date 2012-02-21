@@ -16,6 +16,7 @@
 #include <linux/kdev_t.h>
 #include <linux/gfp.h>
 #include <linux/err.h>
+#include <linux/export.h>
 
 #include "drm_sysfs.h"
 #include "drm_core.h"
@@ -158,8 +159,15 @@ static ssize_t status_show(struct device *device,
 {
 	struct drm_connector *connector = to_drm_connector(device);
 	enum drm_connector_status status;
+	int ret;
 
-	status = connector->funcs->detect(connector);
+	ret = mutex_lock_interruptible(&connector->dev->mode_config.mutex);
+	if (ret)
+		return ret;
+
+	status = connector->funcs->detect(connector, true);
+	mutex_unlock(&connector->dev->mode_config.mutex);
+
 	return snprintf(buf, PAGE_SIZE, "%s\n",
 			drm_get_connector_status_name(status));
 }
@@ -193,8 +201,9 @@ static ssize_t enabled_show(struct device *device,
 			"disabled");
 }
 
-static ssize_t edid_show(struct kobject *kobj, struct bin_attribute *attr,
-			 char *buf, loff_t off, size_t count)
+static ssize_t edid_show(struct file *filp, struct kobject *kobj,
+			 struct bin_attribute *attr, char *buf, loff_t off,
+			 size_t count)
 {
 	struct device *connector_dev = container_of(kobj, struct device, kobj);
 	struct drm_connector *connector = to_drm_connector(connector_dev);
@@ -333,7 +342,7 @@ static struct device_attribute connector_attrs_opt1[] = {
 static struct bin_attribute edid_attr = {
 	.attr.name = "edid",
 	.attr.mode = 0444,
-	.size = 128,
+	.size = 0,
 	.read = edid_show,
 };
 
@@ -488,7 +497,8 @@ int drm_sysfs_device_add(struct drm_minor *minor)
 	int err;
 	char *minor_str;
 
-	minor->kdev.parent = &minor->dev->pdev->dev;
+	minor->kdev.parent = minor->dev->dev;
+
 	minor->kdev.class = drm_class;
 	minor->kdev.release = drm_sysfs_device_release;
 	minor->kdev.devt = minor->device;

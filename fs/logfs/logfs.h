@@ -136,6 +136,7 @@ struct logfs_area_ops {
 	int	(*erase_segment)(struct logfs_area *area);
 };
 
+struct logfs_super;	/* forward */
 /**
  * struct logfs_device_ops - device access operations
  *
@@ -144,6 +145,7 @@ struct logfs_area_ops {
  * @erase:			erase one segment
  * @read:			read from the device
  * @erase:			erase part of the device
+ * @can_write_buf:		decide whether wbuf can be written to ofs
  */
 struct logfs_device_ops {
 	struct page *(*find_first_sb)(struct super_block *sb, u64 *ofs);
@@ -153,8 +155,9 @@ struct logfs_device_ops {
 	void (*writeseg)(struct super_block *sb, u64 ofs, size_t len);
 	int (*erase)(struct super_block *sb, loff_t ofs, size_t len,
 			int ensure_write);
+	int (*can_write_buf)(struct super_block *sb, u64 ofs);
 	void (*sync)(struct super_block *sb);
-	void (*put_device)(struct super_block *sb);
+	void (*put_device)(struct logfs_super *s);
 };
 
 /**
@@ -394,6 +397,7 @@ struct logfs_super {
 	int	 s_lock_count;
 	mempool_t *s_block_pool;		/* struct logfs_block pool */
 	mempool_t *s_shadow_pool;		/* struct logfs_shadow pool */
+	struct list_head s_writeback_list;	/* writeback pages */
 	/*
 	 * Space accounting:
 	 * - s_used_bytes specifies space used to store valid data objects.
@@ -468,11 +472,13 @@ void logfs_compr_exit(void);
 
 /* dev_bdev.c */
 #ifdef CONFIG_BLOCK
-int logfs_get_sb_bdev(struct file_system_type *type, int flags,
-		const char *devname, struct vfsmount *mnt);
+int logfs_get_sb_bdev(struct logfs_super *s,
+		struct file_system_type *type,
+		const char *devname);
 #else
-static inline int logfs_get_sb_bdev(struct file_system_type *type, int flags,
-		const char *devname, struct vfsmount *mnt)
+static inline int logfs_get_sb_bdev(struct logfs_super *s,
+		struct file_system_type *type,
+		const char *devname)
 {
 	return -ENODEV;
 }
@@ -480,11 +486,9 @@ static inline int logfs_get_sb_bdev(struct file_system_type *type, int flags,
 
 /* dev_mtd.c */
 #ifdef CONFIG_MTD
-int logfs_get_sb_mtd(struct file_system_type *type, int flags,
-		int mtdnr, struct vfsmount *mnt);
+int logfs_get_sb_mtd(struct logfs_super *s, int mtdnr);
 #else
-static inline int logfs_get_sb_mtd(struct file_system_type *type, int flags,
-		int mtdnr, struct vfsmount *mnt)
+static inline int logfs_get_sb_mtd(struct logfs_super *s, int mtdnr)
 {
 	return -ENODEV;
 }
@@ -501,9 +505,8 @@ extern const struct inode_operations logfs_reg_iops;
 extern const struct file_operations logfs_reg_fops;
 extern const struct address_space_operations logfs_reg_aops;
 int logfs_readpage(struct file *file, struct page *page);
-int logfs_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
-		unsigned long arg);
-int logfs_fsync(struct file *file, struct dentry *dentry, int datasync);
+long logfs_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+int logfs_fsync(struct file *file, loff_t start, loff_t end, int datasync);
 
 /* gc.c */
 u32 get_best_cand(struct super_block *sb, struct candidate_list *list, u32 *ec);
@@ -522,13 +525,11 @@ struct inode *logfs_new_meta_inode(struct super_block *sb, u64 ino);
 struct inode *logfs_read_meta_inode(struct super_block *sb, u64 ino);
 int logfs_init_inode_cache(void);
 void logfs_destroy_inode_cache(void);
-void destroy_meta_inode(struct inode *inode);
 void logfs_set_blocks(struct inode *inode, u64 no);
 /* these logically belong into inode.c but actually reside in readwrite.c */
 int logfs_read_inode(struct inode *inode);
 int __logfs_write_inode(struct inode *inode, long flags);
-void logfs_delete_inode(struct inode *inode);
-void logfs_clear_inode(struct inode *inode);
+void logfs_evict_inode(struct inode *inode);
 
 /* journal.c */
 void logfs_write_anchor(struct super_block *sb);
@@ -598,30 +599,26 @@ void freeseg(struct super_block *sb, u32 segno);
 int logfs_init_areas(struct super_block *sb);
 void logfs_cleanup_areas(struct super_block *sb);
 int logfs_open_area(struct logfs_area *area, size_t bytes);
-void __logfs_buf_write(struct logfs_area *area, u64 ofs, void *buf, size_t len,
+int __logfs_buf_write(struct logfs_area *area, u64 ofs, void *buf, size_t len,
 		int use_filler);
 
-static inline void logfs_buf_write(struct logfs_area *area, u64 ofs,
+static inline int logfs_buf_write(struct logfs_area *area, u64 ofs,
 		void *buf, size_t len)
 {
-	__logfs_buf_write(area, ofs, buf, len, 0);
+	return __logfs_buf_write(area, ofs, buf, len, 0);
 }
 
-static inline void logfs_buf_recover(struct logfs_area *area, u64 ofs,
+static inline int logfs_buf_recover(struct logfs_area *area, u64 ofs,
 		void *buf, size_t len)
 {
-	__logfs_buf_write(area, ofs, buf, len, 1);
+	return __logfs_buf_write(area, ofs, buf, len, 1);
 }
 
 /* super.c */
 struct page *emergency_read_begin(struct address_space *mapping, pgoff_t index);
 void emergency_read_end(struct page *page);
 void logfs_crash_dump(struct super_block *sb);
-void *memchr_inv(const void *s, int c, size_t n);
 int logfs_statfs(struct dentry *dentry, struct kstatfs *stats);
-int logfs_get_sb_device(struct file_system_type *type, int flags,
-		struct mtd_info *mtd, struct block_device *bdev,
-		const struct logfs_device_ops *devops, struct vfsmount *mnt);
 int logfs_check_ds(struct logfs_disk_super *ds);
 int logfs_write_sb(struct super_block *sb);
 
@@ -704,7 +701,7 @@ static inline gc_level_t expand_level(u64 ino, level_t __level)
 	u8 level = (__force u8)__level;
 
 	if (ino == LOGFS_INO_MASTER) {
-		/* ifile has seperate areas */
+		/* ifile has separate areas */
 		level += LOGFS_MAX_LEVELS;
 	}
 	return (__force gc_level_t)level;

@@ -22,6 +22,7 @@
 
 #include <mach/hardware.h>
 
+#include <mach/clock.h>
 #include <mach/psc.h>
 #include <mach/cputype.h>
 #include "clock.h"
@@ -42,7 +43,8 @@ static void __clk_enable(struct clk *clk)
 	if (clk->parent)
 		__clk_enable(clk->parent);
 	if (clk->usecount++ == 0 && (clk->flags & CLK_PSC))
-		davinci_psc_config(psc_domain(clk), clk->gpsc, clk->lpsc, 1);
+		davinci_psc_config(psc_domain(clk), clk->gpsc, clk->lpsc,
+				true, clk->flags);
 }
 
 static void __clk_disable(struct clk *clk)
@@ -51,7 +53,8 @@ static void __clk_disable(struct clk *clk)
 		return;
 	if (--clk->usecount == 0 && !(clk->flags & CLK_PLL) &&
 	    (clk->flags & CLK_PSC))
-		davinci_psc_config(psc_domain(clk), clk->gpsc, clk->lpsc, 0);
+		davinci_psc_config(psc_domain(clk), clk->gpsc, clk->lpsc,
+				false, clk->flags);
 	if (clk->parent)
 		__clk_disable(clk->parent);
 }
@@ -232,8 +235,10 @@ static int __init clk_disable_unused(void)
 		if (!davinci_psc_is_clk_active(ck->gpsc, ck->lpsc))
 			continue;
 
-		pr_info("Clocks: disable unused %s\n", ck->name);
-		davinci_psc_config(psc_domain(ck), ck->gpsc, ck->lpsc, 0);
+		pr_debug("Clocks: disable unused %s\n", ck->name);
+
+		davinci_psc_config(psc_domain(ck), ck->gpsc, ck->lpsc,
+				false, ck->flags);
 	}
 	spin_unlock_irq(&clockfw_lock);
 
@@ -272,13 +277,86 @@ static unsigned long clk_sysclk_recalc(struct clk *clk)
 
 	v = __raw_readl(pll->base + clk->div_reg);
 	if (v & PLLDIV_EN) {
-		plldiv = (v & PLLDIV_RATIO_MASK) + 1;
+		plldiv = (v & pll->div_ratio_mask) + 1;
 		if (plldiv)
 			rate /= plldiv;
 	}
 
 	return rate;
 }
+
+int davinci_set_sysclk_rate(struct clk *clk, unsigned long rate)
+{
+	unsigned v;
+	struct pll_data *pll;
+	unsigned long input;
+	unsigned ratio = 0;
+
+	/* If this is the PLL base clock, wrong function to call */
+	if (clk->pll_data)
+		return -EINVAL;
+
+	/* There must be a parent... */
+	if (WARN_ON(!clk->parent))
+		return -EINVAL;
+
+	/* ... the parent must be a PLL... */
+	if (WARN_ON(!clk->parent->pll_data))
+		return -EINVAL;
+
+	/* ... and this clock must have a divider. */
+	if (WARN_ON(!clk->div_reg))
+		return -EINVAL;
+
+	pll = clk->parent->pll_data;
+
+	input = clk->parent->rate;
+
+	/* If pre-PLL, source clock is before the multiplier and divider(s) */
+	if (clk->flags & PRE_PLL)
+		input = pll->input_rate;
+
+	if (input > rate) {
+		/*
+		 * Can afford to provide an output little higher than requested
+		 * only if maximum rate supported by hardware on this sysclk
+		 * is known.
+		 */
+		if (clk->maxrate) {
+			ratio = DIV_ROUND_CLOSEST(input, rate);
+			if (input / ratio > clk->maxrate)
+				ratio = 0;
+		}
+
+		if (ratio == 0)
+			ratio = DIV_ROUND_UP(input, rate);
+
+		ratio--;
+	}
+
+	if (ratio > pll->div_ratio_mask)
+		return -EINVAL;
+
+	do {
+		v = __raw_readl(pll->base + PLLSTAT);
+	} while (v & PLLSTAT_GOSTAT);
+
+	v = __raw_readl(pll->base + clk->div_reg);
+	v &= ~pll->div_ratio_mask;
+	v |= ratio | PLLDIV_EN;
+	__raw_writel(v, pll->base + clk->div_reg);
+
+	v = __raw_readl(pll->base + PLLCMD);
+	v |= PLLCMD_GOSET;
+	__raw_writel(v, pll->base + PLLCMD);
+
+	do {
+		v = __raw_readl(pll->base + PLLSTAT);
+	} while (v & PLLSTAT_GOSTAT);
+
+	return 0;
+}
+EXPORT_SYMBOL(davinci_set_sysclk_rate);
 
 static unsigned long clk_leafclk_recalc(struct clk *clk)
 {
@@ -288,6 +366,12 @@ static unsigned long clk_leafclk_recalc(struct clk *clk)
 	return clk->parent->rate;
 }
 
+int davinci_simple_set_rate(struct clk *clk, unsigned long rate)
+{
+	clk->rate = rate;
+	return 0;
+}
+
 static unsigned long clk_pllclk_recalc(struct clk *clk)
 {
 	u32 ctrl, mult = 1, prediv = 1, postdiv = 1;
@@ -295,7 +379,6 @@ static unsigned long clk_pllclk_recalc(struct clk *clk)
 	struct pll_data *pll = clk->pll_data;
 	unsigned long rate = clk->rate;
 
-	pll->base = IO_ADDRESS(pll->phys_base);
 	ctrl = __raw_readl(pll->base + PLLCTL);
 	rate = pll->input_rate = clk->parent->rate;
 
@@ -312,7 +395,7 @@ static unsigned long clk_pllclk_recalc(struct clk *clk)
 	if (pll->flags & PLL_HAS_PREDIV) {
 		prediv = __raw_readl(pll->base + PREDIV);
 		if (prediv & PLLDIV_EN)
-			prediv = (prediv & PLLDIV_RATIO_MASK) + 1;
+			prediv = (prediv & pll->div_ratio_mask) + 1;
 		else
 			prediv = 1;
 	}
@@ -324,7 +407,7 @@ static unsigned long clk_pllclk_recalc(struct clk *clk)
 	if (pll->flags & PLL_HAS_POSTDIV) {
 		postdiv = __raw_readl(pll->base + POSTDIV);
 		if (postdiv & PLLDIV_EN)
-			postdiv = (postdiv & PLLDIV_RATIO_MASK) + 1;
+			postdiv = (postdiv & pll->div_ratio_mask) + 1;
 		else
 			postdiv = 1;
 	}
@@ -427,6 +510,38 @@ int davinci_set_pllrate(struct pll_data *pll, unsigned int prediv,
 }
 EXPORT_SYMBOL(davinci_set_pllrate);
 
+/**
+ * davinci_set_refclk_rate() - Set the reference clock rate
+ * @rate:	The new rate.
+ *
+ * Sets the reference clock rate to a given value. This will most likely
+ * result in the entire clock tree getting updated.
+ *
+ * This is used to support boards which use a reference clock different
+ * than that used by default in <soc>.c file. The reference clock rate
+ * should be updated early in the boot process; ideally soon after the
+ * clock tree has been initialized once with the default reference clock
+ * rate (davinci_common_init()).
+ *
+ * Returns 0 on success, error otherwise.
+ */
+int davinci_set_refclk_rate(unsigned long rate)
+{
+	struct clk *refclk;
+
+	refclk = clk_get(NULL, "ref");
+	if (IS_ERR(refclk)) {
+		pr_err("%s: failed to get reference clock.\n", __func__);
+		return PTR_ERR(refclk);
+	}
+
+	clk_set_rate(refclk, rate);
+
+	clk_put(refclk);
+
+	return 0;
+}
+
 int __init davinci_clk_init(struct clk_lookup *clocks)
   {
 	struct clk_lookup *c;
@@ -449,6 +564,18 @@ int __init davinci_clk_init(struct clk_lookup *clocks)
 			/* Otherwise, it is a leaf clock (PSC clock) */
 			else if (clk->parent)
 				clk->recalc = clk_leafclk_recalc;
+		}
+
+		if (clk->pll_data) {
+			struct pll_data *pll = clk->pll_data;
+
+			if (!pll->div_ratio_mask)
+				pll->div_ratio_mask = PLLDIV_RATIO_MASK;
+
+			if (pll->phys_base && !pll->base) {
+				pll->base = ioremap(pll->phys_base, SZ_4K);
+				WARN_ON(!pll->base);
+			}
 		}
 
 		if (clk->recalc)

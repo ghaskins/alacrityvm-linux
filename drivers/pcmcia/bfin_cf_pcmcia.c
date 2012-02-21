@@ -113,7 +113,7 @@ static int bfin_cf_get_status(struct pcmcia_socket *s, u_int *sp)
 
 	if (bfin_cf_present(cf->cd_pfx)) {
 		*sp = SS_READY | SS_DETECT | SS_POWERON | SS_3VCARD;
-		s->irq.AssignedIRQ = 0;
+		s->pcmcia_irq = 0;
 		s->pci_irq = cf->irq;
 
 	} else
@@ -235,7 +235,7 @@ static int __devinit bfin_cf_probe(struct platform_device *pdev)
 	cf->irq = irq;
 	cf->socket.pci_irq = irq;
 
-	set_irq_type(irq, IRQF_TRIGGER_LOW);
+	irq_set_irq_type(irq, IRQF_TRIGGER_LOW);
 
 	io_mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	attr_mem = platform_get_resource(pdev, IORESOURCE_MEM, 1);

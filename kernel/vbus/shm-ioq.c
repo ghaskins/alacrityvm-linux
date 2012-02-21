@@ -1,11 +1,12 @@
 /*
- * Copyright 2009 Novell.  All Rights Reserved.
+ * Copyright 2009 Novell, Gregory Haskins.  All Rights Reserved.
+ * Copyright 2012 Gregory Haskins <gregory.haskins@gmail.com>
  *
  * IOQ helper for devices - This module implements an IOQ which has
  * been shared with a device via a vbus_shm segment.
  *
  * Author:
- *      Gregory Haskins <ghaskins@novell.com>
+ *      Gregory Haskins <gregory.haskins@gmail.com>
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License
@@ -22,8 +23,8 @@
  */
 
 #include <linux/ioq.h>
-#include <linux/vbus_device.h>
 #include <linux/slab.h>
+#include <linux/vbus_device.h>
 
 struct _ioq {
 	struct vbus_shm *shm;

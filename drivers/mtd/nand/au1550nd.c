@@ -10,6 +10,7 @@
  */
 
 #include <linux/slab.h>
+#include <linux/gpio.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
@@ -18,7 +19,11 @@
 #include <linux/mtd/partitions.h>
 #include <asm/io.h>
 
-#include <asm/mach-au1x00/au1xxx.h>
+#ifdef CONFIG_MIPS_PB1550
+#include <asm/mach-pb1x00/pb1550.h>
+#elif defined(CONFIG_MIPS_DB1550)
+#include <asm/mach-db1x00/db1x00.h>
+#endif
 #include <asm/mach-db1x00/bcsr.h>
 
 /*
@@ -47,7 +52,7 @@ static const struct mtd_partition partition_info[] = {
  * au_read_byte -  read one byte from the chip
  * @mtd:	MTD device structure
  *
- *  read function for 8bit buswith
+ * read function for 8bit buswidth
  */
 static u_char au_read_byte(struct mtd_info *mtd)
 {
@@ -62,7 +67,7 @@ static u_char au_read_byte(struct mtd_info *mtd)
  * @mtd:	MTD device structure
  * @byte:	pointer to data byte to write
  *
- *  write function for 8it buswith
+ * write function for 8it buswidth
  */
 static void au_write_byte(struct mtd_info *mtd, u_char byte)
 {
@@ -72,11 +77,10 @@ static void au_write_byte(struct mtd_info *mtd, u_char byte)
 }
 
 /**
- * au_read_byte16 -  read one byte endianess aware from the chip
+ * au_read_byte16 -  read one byte endianness aware from the chip
  * @mtd:	MTD device structure
  *
- *  read function for 16bit buswith with
- * endianess conversion
+ * read function for 16bit buswidth with endianness conversion
  */
 static u_char au_read_byte16(struct mtd_info *mtd)
 {
@@ -87,12 +91,11 @@ static u_char au_read_byte16(struct mtd_info *mtd)
 }
 
 /**
- * au_write_byte16 -  write one byte endianess aware to the chip
+ * au_write_byte16 -  write one byte endianness aware to the chip
  * @mtd:	MTD device structure
  * @byte:	pointer to data byte to write
  *
- *  write function for 16bit buswith with
- * endianess conversion
+ * write function for 16bit buswidth with endianness conversion
  */
 static void au_write_byte16(struct mtd_info *mtd, u_char byte)
 {
@@ -105,8 +108,7 @@ static void au_write_byte16(struct mtd_info *mtd, u_char byte)
  * au_read_word -  read one word from the chip
  * @mtd:	MTD device structure
  *
- *  read function for 16bit buswith without
- * endianess conversion
+ * read function for 16bit buswidth without endianness conversion
  */
 static u16 au_read_word(struct mtd_info *mtd)
 {
@@ -122,7 +124,7 @@ static u16 au_read_word(struct mtd_info *mtd)
  * @buf:	data buffer
  * @len:	number of bytes to write
  *
- *  write function for 8bit buswith
+ * write function for 8bit buswidth
  */
 static void au_write_buf(struct mtd_info *mtd, const u_char *buf, int len)
 {
@@ -141,7 +143,7 @@ static void au_write_buf(struct mtd_info *mtd, const u_char *buf, int len)
  * @buf:	buffer to store date
  * @len:	number of bytes to read
  *
- *  read function for 8bit buswith
+ * read function for 8bit buswidth
  */
 static void au_read_buf(struct mtd_info *mtd, u_char *buf, int len)
 {
@@ -160,7 +162,7 @@ static void au_read_buf(struct mtd_info *mtd, u_char *buf, int len)
  * @buf:	buffer containing the data to compare
  * @len:	number of bytes to compare
  *
- *  verify function for 8bit buswith
+ * verify function for 8bit buswidth
  */
 static int au_verify_buf(struct mtd_info *mtd, const u_char *buf, int len)
 {
@@ -182,7 +184,7 @@ static int au_verify_buf(struct mtd_info *mtd, const u_char *buf, int len)
  * @buf:	data buffer
  * @len:	number of bytes to write
  *
- *  write function for 16bit buswith
+ * write function for 16bit buswidth
  */
 static void au_write_buf16(struct mtd_info *mtd, const u_char *buf, int len)
 {
@@ -204,7 +206,7 @@ static void au_write_buf16(struct mtd_info *mtd, const u_char *buf, int len)
  * @buf:	buffer to store date
  * @len:	number of bytes to read
  *
- *  read function for 16bit buswith
+ * read function for 16bit buswidth
  */
 static void au_read_buf16(struct mtd_info *mtd, u_char *buf, int len)
 {
@@ -225,7 +227,7 @@ static void au_read_buf16(struct mtd_info *mtd, u_char *buf, int len)
  * @buf:	buffer containing the data to compare
  * @len:	number of bytes to compare
  *
- *  verify function for 16bit buswith
+ * verify function for 16bit buswidth
  */
 static int au_verify_buf16(struct mtd_info *mtd, const u_char *buf, int len)
 {
@@ -451,7 +453,7 @@ static int __init au1xxx_nand_init(void)
 	u32 nand_phys;
 
 	/* Allocate memory for MTD device structure and private data */
-	au1550_mtd = kmalloc(sizeof(struct mtd_info) + sizeof(struct nand_chip), GFP_KERNEL);
+	au1550_mtd = kzalloc(sizeof(struct mtd_info) + sizeof(struct nand_chip), GFP_KERNEL);
 	if (!au1550_mtd) {
 		printk("Unable to allocate NAND MTD dev structure.\n");
 		return -ENOMEM;
@@ -459,10 +461,6 @@ static int __init au1xxx_nand_init(void)
 
 	/* Get pointer to private data */
 	this = (struct nand_chip *)(&au1550_mtd[1]);
-
-	/* Initialize structures */
-	memset(au1550_mtd, 0, sizeof(struct mtd_info));
-	memset(this, 0, sizeof(struct nand_chip));
 
 	/* Link the private data with the MTD structure */
 	au1550_mtd->priv = this;
@@ -474,7 +472,7 @@ static int __init au1xxx_nand_init(void)
 
 #ifdef CONFIG_MIPS_PB1550
 	/* set gpio206 high */
-	au_writel(au_readl(GPIO2_DIR) & ~(1 << 6), GPIO2_DIR);
+	gpio_direction_input(206);
 
 	boot_swapboot = (au_readl(MEM_STSTAT) & (0x7 << 1)) | ((bcsr_read(BCSR_STATUS) >> 6) & 0x1);
 
@@ -544,7 +542,7 @@ static int __init au1xxx_nand_init(void)
 	}
 	nand_phys = (mem_staddr << 4) & 0xFFFC0000;
 
-	p_nand = (void __iomem *)ioremap(nand_phys, 0x1000);
+	p_nand = ioremap(nand_phys, 0x1000);
 
 	/* make controller and MTD agree */
 	if (NAND_CS == 0)
@@ -584,12 +582,13 @@ static int __init au1xxx_nand_init(void)
 	}
 
 	/* Register the partitions */
-	add_mtd_partitions(au1550_mtd, partition_info, ARRAY_SIZE(partition_info));
+	mtd_device_register(au1550_mtd, partition_info,
+			    ARRAY_SIZE(partition_info));
 
 	return 0;
 
  outio:
-	iounmap((void *)p_nand);
+	iounmap(p_nand);
 
  outmem:
 	kfree(au1550_mtd);
@@ -610,7 +609,7 @@ static void __exit au1550_cleanup(void)
 	kfree(au1550_mtd);
 
 	/* Unmap */
-	iounmap((void *)p_nand);
+	iounmap(p_nand);
 }
 
 module_exit(au1550_cleanup);

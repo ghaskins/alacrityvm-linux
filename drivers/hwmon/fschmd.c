@@ -847,10 +847,9 @@ static ssize_t watchdog_write(struct file *filp, const char __user *buf,
 	return count;
 }
 
-static int watchdog_ioctl(struct inode *inode, struct file *filp,
-	unsigned int cmd, unsigned long arg)
+static long watchdog_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-	static struct watchdog_info ident = {
+	struct watchdog_info ident = {
 		.options = WDIOF_KEEPALIVEPING | WDIOF_SETTIMEOUT |
 				WDIOF_CARDRESET,
 		.identity = "FSC watchdog"
@@ -914,7 +913,6 @@ static int watchdog_ioctl(struct inode *inode, struct file *filp,
 	default:
 		ret = -ENOTTY;
 	}
-
 	return ret;
 }
 
@@ -924,7 +922,7 @@ static const struct file_operations watchdog_fops = {
 	.open = watchdog_open,
 	.release = watchdog_release,
 	.write = watchdog_write,
-	.ioctl = watchdog_ioctl,
+	.unlocked_ioctl = watchdog_ioctl,
 };
 
 

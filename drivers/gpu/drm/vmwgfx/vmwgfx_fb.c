@@ -26,6 +26,8 @@
  *
  **************************************************************************/
 
+#include <linux/export.h>
+
 #include "drmP.h"
 #include "vmwgfx_drv.h"
 
@@ -132,16 +134,21 @@ static int vmw_fb_check_var(struct fb_var_screeninfo *var,
 		return -EINVAL;
 	}
 
-	/* without multimon its hard to resize */
-	if (!(vmw_priv->capabilities & SVGA_CAP_MULTIMON) &&
-	    (var->xres != par->max_width ||
-	     var->yres != par->max_height)) {
-		DRM_ERROR("Tried to resize, but we don't have multimon\n");
+	if (!(vmw_priv->capabilities & SVGA_CAP_DISPLAY_TOPOLOGY) &&
+	    (var->xoffset != 0 || var->yoffset != 0)) {
+		DRM_ERROR("Can not handle panning without display topology\n");
 		return -EINVAL;
 	}
 
-	if (var->xres > par->max_width ||
-	    var->yres > par->max_height) {
+	if ((var->xoffset + var->xres) > par->max_width ||
+	    (var->yoffset + var->yres) > par->max_height) {
+		DRM_ERROR("Requested geom can not fit in framebuffer\n");
+		return -EINVAL;
+	}
+
+	if (!vmw_kms_validate_mode_vram(vmw_priv,
+					info->fix.line_length,
+					var->yoffset + var->yres)) {
 		DRM_ERROR("Requested geom can not fit in framebuffer\n");
 		return -EINVAL;
 	}
@@ -153,28 +160,16 @@ static int vmw_fb_set_par(struct fb_info *info)
 {
 	struct vmw_fb_par *par = info->par;
 	struct vmw_private *vmw_priv = par->vmw_priv;
+	int ret;
 
-	if (vmw_priv->capabilities & SVGA_CAP_MULTIMON) {
-		vmw_write(vmw_priv, SVGA_REG_NUM_GUEST_DISPLAYS, 1);
-		vmw_write(vmw_priv, SVGA_REG_DISPLAY_ID, 0);
-		vmw_write(vmw_priv, SVGA_REG_DISPLAY_IS_PRIMARY, true);
-		vmw_write(vmw_priv, SVGA_REG_DISPLAY_POSITION_X, 0);
-		vmw_write(vmw_priv, SVGA_REG_DISPLAY_POSITION_Y, 0);
-		vmw_write(vmw_priv, SVGA_REG_DISPLAY_WIDTH, 0);
-		vmw_write(vmw_priv, SVGA_REG_DISPLAY_HEIGHT, 0);
-		vmw_write(vmw_priv, SVGA_REG_DISPLAY_ID, SVGA_ID_INVALID);
+	ret = vmw_kms_write_svga(vmw_priv, info->var.xres, info->var.yres,
+				 info->fix.line_length,
+				 par->bpp, par->depth);
+	if (ret)
+		return ret;
 
-		vmw_write(vmw_priv, SVGA_REG_ENABLE, 1);
-		vmw_write(vmw_priv, SVGA_REG_WIDTH, par->max_width);
-		vmw_write(vmw_priv, SVGA_REG_HEIGHT, par->max_height);
-		vmw_write(vmw_priv, SVGA_REG_BITS_PER_PIXEL, par->bpp);
-		vmw_write(vmw_priv, SVGA_REG_DEPTH, par->depth);
-		vmw_write(vmw_priv, SVGA_REG_RED_MASK, 0x00ff0000);
-		vmw_write(vmw_priv, SVGA_REG_GREEN_MASK, 0x0000ff00);
-		vmw_write(vmw_priv, SVGA_REG_BLUE_MASK, 0x000000ff);
-
+	if (vmw_priv->capabilities & SVGA_CAP_DISPLAY_TOPOLOGY) {
 		/* TODO check if pitch and offset changes */
-
 		vmw_write(vmw_priv, SVGA_REG_NUM_GUEST_DISPLAYS, 1);
 		vmw_write(vmw_priv, SVGA_REG_DISPLAY_ID, 0);
 		vmw_write(vmw_priv, SVGA_REG_DISPLAY_IS_PRIMARY, true);
@@ -183,12 +178,12 @@ static int vmw_fb_set_par(struct fb_info *info)
 		vmw_write(vmw_priv, SVGA_REG_DISPLAY_WIDTH, info->var.xres);
 		vmw_write(vmw_priv, SVGA_REG_DISPLAY_HEIGHT, info->var.yres);
 		vmw_write(vmw_priv, SVGA_REG_DISPLAY_ID, SVGA_ID_INVALID);
-	} else {
-		vmw_write(vmw_priv, SVGA_REG_WIDTH, info->var.xres);
-		vmw_write(vmw_priv, SVGA_REG_HEIGHT, info->var.yres);
-
-		/* TODO check if pitch and offset changes */
 	}
+
+	/* This is really helpful since if this fails the user
+	 * can probably not see anything on the screen.
+	 */
+	WARN_ON(vmw_read(vmw_priv, SVGA_REG_FB_OFFSET) != 0);
 
 	return 0;
 }
@@ -222,6 +217,9 @@ static void vmw_fb_dirty_flush(struct vmw_fb_par *par)
 		uint32_t header;
 		SVGAFifoCmdUpdate body;
 	} *cmd;
+
+	if (vmw_priv->suspended)
+		return;
 
 	spin_lock_irqsave(&par->dirty.lock, flags);
 	if (!par->dirty.active) {
@@ -413,51 +411,26 @@ int vmw_fb_init(struct vmw_private *vmw_priv)
 	struct fb_info *info;
 	unsigned initial_width, initial_height;
 	unsigned fb_width, fb_height;
-	unsigned fb_bbp, fb_depth, fb_offset, fb_pitch, fb_size;
+	unsigned fb_bpp, fb_depth, fb_offset, fb_pitch, fb_size;
 	int ret;
 
+	/* XXX These shouldn't be hardcoded. */
 	initial_width = 800;
 	initial_height = 600;
 
-	fb_bbp = 32;
+	fb_bpp = 32;
 	fb_depth = 24;
 
-	if (vmw_priv->capabilities & SVGA_CAP_MULTIMON) {
-		fb_width = min(vmw_priv->fb_max_width, (unsigned)2048);
-		fb_height = min(vmw_priv->fb_max_height, (unsigned)2048);
-	} else {
-		fb_width = min(vmw_priv->fb_max_width, initial_width);
-		fb_height = min(vmw_priv->fb_max_height, initial_height);
-	}
+	/* XXX As shouldn't these be as well. */
+	fb_width = min(vmw_priv->fb_max_width, (unsigned)2048);
+	fb_height = min(vmw_priv->fb_max_height, (unsigned)2048);
 
 	initial_width = min(fb_width, initial_width);
 	initial_height = min(fb_height, initial_height);
 
-	vmw_write(vmw_priv, SVGA_REG_WIDTH, fb_width);
-	vmw_write(vmw_priv, SVGA_REG_HEIGHT, fb_height);
-	vmw_write(vmw_priv, SVGA_REG_BITS_PER_PIXEL, fb_bbp);
-	vmw_write(vmw_priv, SVGA_REG_DEPTH, fb_depth);
-	vmw_write(vmw_priv, SVGA_REG_RED_MASK, 0x00ff0000);
-	vmw_write(vmw_priv, SVGA_REG_GREEN_MASK, 0x0000ff00);
-	vmw_write(vmw_priv, SVGA_REG_BLUE_MASK, 0x000000ff);
-
-	fb_size = vmw_read(vmw_priv, SVGA_REG_FB_SIZE);
+	fb_pitch = fb_width * fb_bpp / 8;
+	fb_size = fb_pitch * fb_height;
 	fb_offset = vmw_read(vmw_priv, SVGA_REG_FB_OFFSET);
-	fb_pitch = vmw_read(vmw_priv, SVGA_REG_BYTES_PER_LINE);
-
-	DRM_DEBUG("width  %u\n", vmw_read(vmw_priv, SVGA_REG_MAX_WIDTH));
-	DRM_DEBUG("height %u\n", vmw_read(vmw_priv, SVGA_REG_MAX_HEIGHT));
-	DRM_DEBUG("width  %u\n", vmw_read(vmw_priv, SVGA_REG_WIDTH));
-	DRM_DEBUG("height %u\n", vmw_read(vmw_priv, SVGA_REG_HEIGHT));
-	DRM_DEBUG("bpp    %u\n", vmw_read(vmw_priv, SVGA_REG_BITS_PER_PIXEL));
-	DRM_DEBUG("depth  %u\n", vmw_read(vmw_priv, SVGA_REG_DEPTH));
-	DRM_DEBUG("bpl    %u\n", vmw_read(vmw_priv, SVGA_REG_BYTES_PER_LINE));
-	DRM_DEBUG("r mask %08x\n", vmw_read(vmw_priv, SVGA_REG_RED_MASK));
-	DRM_DEBUG("g mask %08x\n", vmw_read(vmw_priv, SVGA_REG_GREEN_MASK));
-	DRM_DEBUG("b mask %08x\n", vmw_read(vmw_priv, SVGA_REG_BLUE_MASK));
-	DRM_DEBUG("fb_offset 0x%08x\n", fb_offset);
-	DRM_DEBUG("fb_pitch  %u\n", fb_pitch);
-	DRM_DEBUG("fb_size   %u kiB\n", fb_size / 1024);
 
 	info = framebuffer_alloc(sizeof(*par), device);
 	if (!info)
@@ -470,7 +443,7 @@ int vmw_fb_init(struct vmw_private *vmw_priv)
 	par = info->par;
 	par->vmw_priv = vmw_priv;
 	par->depth = fb_depth;
-	par->bpp = fb_bbp;
+	par->bpp = fb_bpp;
 	par->vmalloc = NULL;
 	par->max_width = fb_width;
 	par->max_height = fb_height;
@@ -512,9 +485,6 @@ int vmw_fb_init(struct vmw_private *vmw_priv)
 
 	info->fix.smem_start = 0;
 	info->fix.smem_len = fb_size;
-
-	info->fix.mmio_start = 0;
-	info->fix.mmio_len = 0;
 
 	info->pseudo_palette = par->pseudo_palette;
 	info->screen_base = par->vmalloc;
@@ -559,14 +529,19 @@ int vmw_fb_init(struct vmw_private *vmw_priv)
 	info->pixmap.scan_align = 1;
 #endif
 
-	info->aperture_base = vmw_priv->vram_start;
-	info->aperture_size = vmw_priv->vram_size;
+	info->apertures = alloc_apertures(1);
+	if (!info->apertures) {
+		ret = -ENOMEM;
+		goto err_aper;
+	}
+	info->apertures->ranges[0].base = vmw_priv->vram_start;
+	info->apertures->ranges[0].size = vmw_priv->vram_size;
 
 	/*
 	 * Dirty & Deferred IO
 	 */
 	par->dirty.x1 = par->dirty.x2 = 0;
-	par->dirty.y1 = par->dirty.y1 = 0;
+	par->dirty.y1 = par->dirty.y2 = 0;
 	par->dirty.active = true;
 	spin_lock_init(&par->dirty.lock);
 	info->fbdefio = &vmw_defio;
@@ -580,6 +555,7 @@ int vmw_fb_init(struct vmw_private *vmw_priv)
 
 err_defio:
 	fb_deferred_io_cleanup(info);
+err_aper:
 	ttm_bo_kunmap(&par->map);
 err_unref:
 	ttm_bo_unref((struct ttm_buffer_object **)&par->vmw_bo);
@@ -618,48 +594,6 @@ int vmw_fb_close(struct vmw_private *vmw_priv)
 	return 0;
 }
 
-int vmw_dmabuf_from_vram(struct vmw_private *vmw_priv,
-			 struct vmw_dma_buffer *vmw_bo)
-{
-	struct ttm_buffer_object *bo = &vmw_bo->base;
-	int ret = 0;
-
-	ret = ttm_bo_reserve(bo, false, false, false, 0);
-	if (unlikely(ret != 0))
-		return ret;
-
-	ret = ttm_bo_validate(bo, &vmw_sys_placement, false, false);
-	ttm_bo_unreserve(bo);
-
-	return ret;
-}
-
-int vmw_dmabuf_to_start_of_vram(struct vmw_private *vmw_priv,
-				struct vmw_dma_buffer *vmw_bo)
-{
-	struct ttm_buffer_object *bo = &vmw_bo->base;
-	struct ttm_placement ne_placement = vmw_vram_ne_placement;
-	int ret = 0;
-
-	ne_placement.lpfn = bo->num_pages;
-
-	/* interuptable? */
-	ret = ttm_write_lock(&vmw_priv->active_master->lock, false);
-	if (unlikely(ret != 0))
-		return ret;
-
-	ret = ttm_bo_reserve(bo, false, false, false, 0);
-	if (unlikely(ret != 0))
-		goto err_unlock;
-
-	ret = ttm_bo_validate(bo, &ne_placement, false, false);
-	ttm_bo_unreserve(bo);
-err_unlock:
-	ttm_write_unlock(&vmw_priv->active_master->lock);
-
-	return ret;
-}
-
 int vmw_fb_off(struct vmw_private *vmw_priv)
 {
 	struct fb_info *info;
@@ -676,12 +610,12 @@ int vmw_fb_off(struct vmw_private *vmw_priv)
 	par->dirty.active = false;
 	spin_unlock_irqrestore(&par->dirty.lock, flags);
 
-	flush_scheduled_work();
+	flush_delayed_work_sync(&info->deferred_work);
 
 	par->bo_ptr = NULL;
 	ttm_bo_kunmap(&par->map);
 
-	vmw_dmabuf_from_vram(vmw_priv, par->vmw_bo);
+	vmw_dmabuf_unpin(vmw_priv, par->vmw_bo, false);
 
 	return 0;
 }
@@ -707,7 +641,7 @@ int vmw_fb_on(struct vmw_private *vmw_priv)
 	/* Make sure that all overlays are stoped when we take over */
 	vmw_overlay_stop_all(vmw_priv);
 
-	ret = vmw_dmabuf_to_start_of_vram(vmw_priv, par->vmw_bo);
+	ret = vmw_dmabuf_to_start_of_vram(vmw_priv, par->vmw_bo, true, false);
 	if (unlikely(ret != 0)) {
 		DRM_ERROR("could not move buffer to start of VRAM\n");
 		goto err_no_buffer;

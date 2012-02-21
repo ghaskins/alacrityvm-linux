@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2010, Intel Corp.
+ * Copyright (C) 2000 - 2011, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -323,7 +323,7 @@ acpi_ds_get_field_names(struct acpi_create_field_info *info,
 		default:
 
 			ACPI_ERROR((AE_INFO,
-				    "Invalid opcode in field list: %X",
+				    "Invalid opcode in field list: 0x%X",
 				    arg->common.aml_opcode));
 			return_ACPI_STATUS(AE_AML_BAD_OPCODE);
 		}

@@ -4,11 +4,12 @@
  */
 #include <linux/slab.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/dma-mapping.h>
 
 struct dma_coherent_mem {
 	void		*virt_base;
-	u32		device_base;
+	dma_addr_t	device_base;
 	int		size;
 	int		flags;
 	unsigned long	*bitmap;

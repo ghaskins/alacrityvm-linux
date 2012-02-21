@@ -55,12 +55,6 @@ static const u32 PIE_BIT_DEF[MAX_PIE_NUM][2] = {
 	{ MAX_PIE_FREQ,	RTC_SAM7_BIT },
 };
 
-/* Those are the bits from a classic RTC we want to mimic */
-#define RTC_IRQF	0x80	/* any of the following 3 is active */
-#define RTC_PF		0x40	/* Periodic interrupt */
-#define RTC_AF		0x20	/* Alarm interrupt */
-#define RTC_UF		0x10	/* Update interrupt for 1Hz RTC */
-
 #define MXC_RTC_TIME	0
 #define MXC_RTC_ALARM	1
 
@@ -83,12 +77,6 @@ struct rtc_plat_data {
 	void __iomem *ioaddr;
 	int irq;
 	struct clk *clk;
-	unsigned int irqen;
-	int alrm_sec;
-	int alrm_min;
-	int alrm_hour;
-	int alrm_mday;
-	struct timespec mxc_rtc_delta;
 	struct rtc_time g_rtc_alarm;
 };
 
@@ -280,12 +268,6 @@ static int mxc_rtc_alarm_irq_enable(struct device *dev, unsigned int enabled)
 	return 0;
 }
 
-static int mxc_rtc_update_irq_enable(struct device *dev, unsigned int enabled)
-{
-	mxc_rtc_irq_enable(dev, RTC_1HZ_BIT, enabled);
-	return 0;
-}
-
 /*
  * This function reads the current RTC time into tm in Gregorian date.
  */
@@ -374,12 +356,10 @@ static struct rtc_class_ops mxc_rtc_ops = {
 	.read_alarm		= mxc_rtc_read_alarm,
 	.set_alarm		= mxc_rtc_set_alarm,
 	.alarm_irq_enable	= mxc_rtc_alarm_irq_enable,
-	.update_irq_enable	= mxc_rtc_update_irq_enable,
 };
 
 static int __init mxc_rtc_probe(struct platform_device *pdev)
 {
-	struct clk *clk;
 	struct resource *res;
 	struct rtc_device *rtc;
 	struct rtc_plat_data *pdata = NULL;
@@ -402,14 +382,15 @@ static int __init mxc_rtc_probe(struct platform_device *pdev)
 	pdata->ioaddr = devm_ioremap(&pdev->dev, res->start,
 				     resource_size(res));
 
-	clk = clk_get(&pdev->dev, "ckil");
-	if (IS_ERR(clk)) {
-		ret = PTR_ERR(clk);
+	pdata->clk = clk_get(&pdev->dev, "rtc");
+	if (IS_ERR(pdata->clk)) {
+		dev_err(&pdev->dev, "unable to get clock!\n");
+		ret = PTR_ERR(pdata->clk);
 		goto exit_free_pdata;
 	}
 
-	rate = clk_get_rate(clk);
-	clk_put(clk);
+	clk_enable(pdata->clk);
+	rate = clk_get_rate(pdata->clk);
 
 	if (rate == 32768)
 		reg = RTC_INPUT_CLK_32768HZ;
@@ -420,7 +401,7 @@ static int __init mxc_rtc_probe(struct platform_device *pdev)
 	else {
 		dev_err(&pdev->dev, "rtc clock is not valid (%lu)\n", rate);
 		ret = -EINVAL;
-		goto exit_free_pdata;
+		goto exit_put_clk;
 	}
 
 	reg |= RTC_ENABLE_BIT;
@@ -428,26 +409,9 @@ static int __init mxc_rtc_probe(struct platform_device *pdev)
 	if (((readw(pdata->ioaddr + RTC_RTCCTL)) & RTC_ENABLE_BIT) == 0) {
 		dev_err(&pdev->dev, "hardware module can't be enabled!\n");
 		ret = -EIO;
-		goto exit_free_pdata;
-	}
-
-	pdata->clk = clk_get(&pdev->dev, "rtc");
-	if (IS_ERR(pdata->clk)) {
-		dev_err(&pdev->dev, "unable to get clock!\n");
-		ret = PTR_ERR(pdata->clk);
-		goto exit_free_pdata;
-	}
-
-	clk_enable(pdata->clk);
-
-	rtc = rtc_device_register(pdev->name, &pdev->dev, &mxc_rtc_ops,
-				  THIS_MODULE);
-	if (IS_ERR(rtc)) {
-		ret = PTR_ERR(rtc);
 		goto exit_put_clk;
 	}
 
-	pdata->rtc = rtc;
 	platform_set_drvdata(pdev, pdata);
 
 	/* Configure and enable the RTC */
@@ -460,8 +424,19 @@ static int __init mxc_rtc_probe(struct platform_device *pdev)
 		pdata->irq = -1;
 	}
 
+	rtc = rtc_device_register(pdev->name, &pdev->dev, &mxc_rtc_ops,
+				  THIS_MODULE);
+	if (IS_ERR(rtc)) {
+		ret = PTR_ERR(rtc);
+		goto exit_clr_drvdata;
+	}
+
+	pdata->rtc = rtc;
+
 	return 0;
 
+exit_clr_drvdata:
+	platform_set_drvdata(pdev, NULL);
 exit_put_clk:
 	clk_disable(pdata->clk);
 	clk_put(pdata->clk);

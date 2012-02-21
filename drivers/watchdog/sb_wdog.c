@@ -300,12 +300,12 @@ static int __init sbwdog_init(void)
 	 * get the resources
 	 */
 
-	ret = request_irq(1, sbwdog_interrupt, IRQF_DISABLED | IRQF_SHARED,
+	ret = request_irq(1, sbwdog_interrupt, IRQF_SHARED,
 		ident.identity, (void *)user_dog);
 	if (ret) {
 		printk(KERN_ERR "%s: failed to request irq 1 - %d\n",
 						ident.identity, ret);
-		return ret;
+		goto out;
 	}
 
 	ret = misc_register(&sbwdog_miscdev);
@@ -313,14 +313,20 @@ static int __init sbwdog_init(void)
 		printk(KERN_INFO "%s: timeout is %ld.%ld secs\n",
 				ident.identity,
 				timeout / 1000000, (timeout / 100000) % 10);
-	} else
-		free_irq(1, (void *)user_dog);
+		return 0;
+	}
+	free_irq(1, (void *)user_dog);
+out:
+	unregister_reboot_notifier(&sbwdog_notifier);
+
 	return ret;
 }
 
 static void __exit sbwdog_exit(void)
 {
 	misc_deregister(&sbwdog_miscdev);
+	free_irq(1, (void *)user_dog);
+	unregister_reboot_notifier(&sbwdog_notifier);
 }
 
 module_init(sbwdog_init);
@@ -344,7 +350,7 @@ void platform_wd_setup(void)
 {
 	int ret;
 
-	ret = request_irq(1, sbwdog_interrupt, IRQF_DISABLED | IRQF_SHARED,
+	ret = request_irq(1, sbwdog_interrupt, IRQF_SHARED,
 		"Kernel Watchdog", IOADDR(A_SCD_WDOG_CFG_0));
 	if (ret) {
 		printk(KERN_CRIT

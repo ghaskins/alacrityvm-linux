@@ -28,6 +28,7 @@
 #include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/module.h>
 
 #include <plat/dma.h>
 
@@ -90,7 +91,7 @@ static void omapdss_release(struct device *dev)
 
 /* dummy device for clocks */
 static struct platform_device omapdss_device = {
-	.name		= "omapdss",
+	.name		= "omapdss_dss",
 	.id		= -1,
 	.dev            = {
 		.release = omapdss_release,

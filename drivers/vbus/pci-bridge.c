@@ -1,8 +1,9 @@
 /*
- * Copyright (C) 2009 Novell.  All Rights Reserved.
+ * Copyright (C) 2009 Novell, Gregory Haskins.  All Rights Reserved.
+ * Copyright 2012 Gregory Haskins <gregory.haskins@gmail.com>
  *
  * Author:
- *	Gregory Haskins <ghaskins@novell.com>
+ *	Gregory Haskins <gregory.haskins@gmail.com>
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License
@@ -270,15 +271,15 @@ vbus_pci_device_close(struct vbus_device_proxy *vdev, int flags)
 
 #ifdef CONFIG_HAVE_CREATE_IRQ
 
-static void vbus_irq_chip_noop(unsigned int irq)
+static void vbus_irq_chip_noop(struct irq_data *data)
 {
 }
 
 static struct irq_chip vbus_irq_chip = {
 	.name		= "VBUS",
-	.mask		= vbus_irq_chip_noop,
-	.unmask		= vbus_irq_chip_noop,
-	.eoi		= vbus_irq_chip_noop,
+	.irq_mask	= vbus_irq_chip_noop,
+	.irq_unmask	= vbus_irq_chip_noop,
+	.irq_eoi	= vbus_irq_chip_noop,
 };
 
 irqreturn_t
@@ -314,7 +315,7 @@ shmsignal_connect(struct _signal *_signal)
 	_signal->irq = irq;
 	_signal->desc = irq_to_desc(irq);
 
-	set_irq_chip_and_handler_name(irq,
+	irq_set_chip_and_handler_name(irq,
 				      &vbus_irq_chip,
 				      handle_percpu_irq,
 				      "edge");
@@ -1035,8 +1036,8 @@ vbus_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	vbus_pci.enabled = true;
 
-	printk(KERN_INFO "Virtual-Bus: Copyright (c) 2009, " \
-	       "Gregory Haskins <ghaskins@novell.com>\n");
+	printk(KERN_INFO "Virtual-Bus: Copyright (c) 2009-2012, " \
+	       "Gregory Haskins <gregory.haskins@gmail.com>\n");
 
 	return 0;
 

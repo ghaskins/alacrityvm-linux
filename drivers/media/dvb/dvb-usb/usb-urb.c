@@ -96,8 +96,9 @@ static int usb_free_stream_buffers(struct usb_data_stream *stream)
 		while (stream->buf_num) {
 			stream->buf_num--;
 			deb_mem("freeing buffer %d\n",stream->buf_num);
-			usb_buffer_free(stream->udev, stream->buf_size,
-					stream->buf_list[stream->buf_num], stream->dma_addr[stream->buf_num]);
+			usb_free_coherent(stream->udev, stream->buf_size,
+					  stream->buf_list[stream->buf_num],
+					  stream->dma_addr[stream->buf_num]);
 		}
 	}
 
@@ -116,7 +117,7 @@ static int usb_allocate_stream_buffers(struct usb_data_stream *stream, int num, 
 	for (stream->buf_num = 0; stream->buf_num < num; stream->buf_num++) {
 		deb_mem("allocating buffer %d\n",stream->buf_num);
 		if (( stream->buf_list[stream->buf_num] =
-					usb_buffer_alloc(stream->udev, size, GFP_ATOMIC,
+					usb_alloc_coherent(stream->udev, size, GFP_ATOMIC,
 					&stream->dma_addr[stream->buf_num]) ) == NULL) {
 			deb_mem("not enough memory for urb-buffer allocation.\n");
 			usb_free_stream_buffers(stream);
@@ -147,7 +148,7 @@ static int usb_bulk_urb_init(struct usb_data_stream *stream)
 		if (!stream->urb_list[i]) {
 			deb_mem("not enough memory for urb_alloc_urb!.\n");
 			for (j = 0; j < i; j++)
-				usb_free_urb(stream->urb_list[i]);
+				usb_free_urb(stream->urb_list[j]);
 			return -ENOMEM;
 		}
 		usb_fill_bulk_urb( stream->urb_list[i], stream->udev,
@@ -180,7 +181,7 @@ static int usb_isoc_urb_init(struct usb_data_stream *stream)
 		if (!stream->urb_list[i]) {
 			deb_mem("not enough memory for urb_alloc_urb!\n");
 			for (j = 0; j < i; j++)
-				usb_free_urb(stream->urb_list[i]);
+				usb_free_urb(stream->urb_list[j]);
 			return -ENOMEM;
 		}
 

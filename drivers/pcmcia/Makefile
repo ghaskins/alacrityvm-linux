@@ -2,15 +2,17 @@
 # Makefile for the kernel pcmcia subsystem (c/o David Hinds)
 #
 
-pcmcia_core-y					+= cs.o rsrc_mgr.o socket_sysfs.o
+pcmcia_core-y					+= cs.o socket_sysfs.o
 pcmcia_core-$(CONFIG_CARDBUS)			+= cardbus.o
 obj-$(CONFIG_PCCARD)				+= pcmcia_core.o
 
-pcmcia-y					+= ds.o pcmcia_resource.o cistpl.o
-pcmcia-$(CONFIG_PCMCIA_IOCTL)			+= pcmcia_ioctl.o
+pcmcia-y					+= ds.o pcmcia_resource.o cistpl.o pcmcia_cis.o
 obj-$(CONFIG_PCMCIA)				+= pcmcia.o
 
-obj-$(CONFIG_PCCARD_NONSTATIC)			+= rsrc_nonstatic.o
+pcmcia_rsrc-y					+= rsrc_mgr.o
+pcmcia_rsrc-$(CONFIG_PCCARD_NONSTATIC)		+= rsrc_nonstatic.o
+pcmcia_rsrc-$(CONFIG_PCCARD_IODYN)		+= rsrc_iodyn.o
+obj-$(CONFIG_PCCARD)				+= pcmcia_rsrc.o
 
 
 # socket drivers
@@ -48,8 +50,9 @@ sa1111_cs-$(CONFIG_SA1100_JORNADA720)		+= sa1100_jornada720.o
 sa1100_cs-y					+= sa1100_generic.o
 sa1100_cs-$(CONFIG_SA1100_ASSABET)		+= sa1100_assabet.o
 sa1100_cs-$(CONFIG_SA1100_CERF)			+= sa1100_cerf.o
-sa1100_cs-$(CONFIG_SA1100_COLLIE)              += pxa2xx_sharpsl.o
+sa1100_cs-$(CONFIG_SA1100_COLLIE)		+= pxa2xx_sharpsl.o
 sa1100_cs-$(CONFIG_SA1100_H3600)		+= sa1100_h3600.o
+sa1100_cs-$(CONFIG_SA1100_NANOENGINE)		+= sa1100_nanoengine.o
 sa1100_cs-$(CONFIG_SA1100_SHANNON)		+= sa1100_shannon.o
 sa1100_cs-$(CONFIG_SA1100_SIMPAD)		+= sa1100_simpad.o
 
@@ -66,6 +69,10 @@ pxa2xx-obj-$(CONFIG_MACH_PALMTC)		+= pxa2xx_palmtc.o
 pxa2xx-obj-$(CONFIG_MACH_PALMLD)		+= pxa2xx_palmld.o
 pxa2xx-obj-$(CONFIG_MACH_E740)			+= pxa2xx_e740.o
 pxa2xx-obj-$(CONFIG_MACH_STARGATE2)		+= pxa2xx_stargate2.o
+pxa2xx-obj-$(CONFIG_MACH_VPAC270)		+= pxa2xx_vpac270.o
+pxa2xx-obj-$(CONFIG_MACH_BALLOON3)		+= pxa2xx_balloon3.o
+pxa2xx-obj-$(CONFIG_MACH_COLIBRI)		+= pxa2xx_colibri.o
+pxa2xx-obj-$(CONFIG_MACH_COLIBRI320)		+= pxa2xx_colibri.o
 
 obj-$(CONFIG_PCMCIA_PXA2XX)			+= pxa2xx_base.o $(pxa2xx-obj-y)
 

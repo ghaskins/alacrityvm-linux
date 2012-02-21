@@ -31,6 +31,7 @@
 #include <asm/asm-offsets.h>
 #include <asm/unistd.h>
 #include <asm/ftrace.h>
+#include <asm/ptrace.h>
 
 #undef SHOW_SYSCALLS
 #undef SHOW_SYSCALLS_TASK
@@ -214,7 +215,22 @@ reenable_mmu:				/* re-enable mmu so we can */
 	stw	r9,8(r1)
 	stw	r11,12(r1)
 	stw	r3,ORIG_GPR3(r1)
+	/*
+	 * The trace_hardirqs_off will use CALLER_ADDR0 and CALLER_ADDR1.
+	 * If from user mode there is only one stack frame on the stack, and
+	 * accessing CALLER_ADDR1 will cause oops. So we need create a dummy
+	 * stack frame to make trace_hardirqs_off happy.
+	 */
+	andi.	r12,r12,MSR_PR
+	beq	11f
+	stwu	r1,-16(r1)
 	bl	trace_hardirqs_off
+	addi	r1,r1,16
+	b	12f
+
+11:
+	bl	trace_hardirqs_off
+12:
 	lwz	r0,GPR0(r1)
 	lwz	r3,ORIG_GPR3(r1)
 	lwz	r4,GPR4(r1)
@@ -373,11 +389,13 @@ syscall_exit_cont:
 	bnel-	load_dbcr0
 #endif
 #ifdef CONFIG_44x
+BEGIN_MMU_FTR_SECTION
 	lis	r4,icache_44x_need_flush@ha
 	lwz	r5,icache_44x_need_flush@l(r4)
 	cmplwi	cr0,r5,0
 	bne-	2f
 1:
+END_MMU_FTR_SECTION_IFCLR(MMU_FTR_TYPE_47x)
 #endif /* CONFIG_44x */
 BEGIN_FTR_SECTION
 	lwarx	r7,0,r1
@@ -848,6 +866,9 @@ resume_kernel:
 	/* interrupts are hard-disabled at this point */
 restore:
 #ifdef CONFIG_44x
+BEGIN_MMU_FTR_SECTION
+	b	1f
+END_MMU_FTR_SECTION_IFSET(MMU_FTR_TYPE_47x)
 	lis	r4,icache_44x_need_flush@ha
 	lwz	r5,icache_44x_need_flush@l(r4)
 	cmplwi	cr0,r5,0
@@ -874,7 +895,18 @@ restore:
 	 */
 	andi.	r10,r9,MSR_EE
 	beq	1f
+	/*
+	 * Since the ftrace irqsoff latency trace checks CALLER_ADDR1,
+	 * which is the stack frame here, we need to force a stack frame
+	 * in case we came from user space.
+	 */
+	stwu	r1,-32(r1)
+	mflr	r0
+	stw	r0,4(r1)
+	stwu	r1,-32(r1)
 	bl	trace_hardirqs_on
+	lwz	r1,0(r1)
+	lwz	r1,0(r1)
 	lwz	r9,_MSR(r1)
 1:
 #endif /* CONFIG_TRACE_IRQFLAGS */

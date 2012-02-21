@@ -35,7 +35,7 @@ enum cpu_type {
 	CPU_SH7723, CPU_SH7724, CPU_SH7757, CPU_SHX3,
 
 	/* SH4AL-DSP types */
-	CPU_SH7343, CPU_SH7722, CPU_SH7366,
+	CPU_SH7343, CPU_SH7722, CPU_SH7366, CPU_SH7372,
 
 	/* SH-5 types */
         CPU_SH5_101, CPU_SH5_103,
@@ -85,6 +85,11 @@ struct sh_cpuinfo {
 	struct tlb_info itlb;
 	struct tlb_info dtlb;
 
+#ifdef CONFIG_SMP
+	struct task_struct *idle;
+#endif
+
+	unsigned int phys_bits;
 	unsigned long flags;
 } __attribute__ ((aligned(L1_CACHE_BYTES)));
 
@@ -101,6 +106,9 @@ struct seq_operations;
 struct task_struct;
 
 extern struct pt_regs fake_swapper_regs;
+
+extern void cpu_init(void);
+extern void cpu_probe(void);
 
 /* arch/sh/kernel/process.c */
 extern unsigned int xstate_size;

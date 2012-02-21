@@ -97,8 +97,10 @@ static int write_reg(struct hfcsusb *hw, __u8 reg, __u8 val)
 			hw->name, __func__, reg, val);
 
 	spin_lock(&hw->ctrl_lock);
-	if (hw->ctrl_cnt >= HFC_CTRL_BUFSIZE)
+	if (hw->ctrl_cnt >= HFC_CTRL_BUFSIZE) {
+		spin_unlock(&hw->ctrl_lock);
 		return 1;
+	}
 	buf = &hw->ctrl_buff[hw->ctrl_in_idx];
 	buf->hfcs_reg = reg;
 	buf->reg_val = val;
@@ -116,14 +118,12 @@ static void
 ctrl_complete(struct urb *urb)
 {
 	struct hfcsusb *hw = (struct hfcsusb *) urb->context;
-	struct ctrl_buf *buf;
 
 	if (debug & DBG_HFC_CALL_TRACE)
 		printk(KERN_DEBUG "%s: %s\n", hw->name, __func__);
 
 	urb->dev = hw->dev;
 	if (hw->ctrl_cnt) {
-		buf = &hw->ctrl_buff[hw->ctrl_out_idx];
 		hw->ctrl_cnt--;	/* decrement actual count */
 		if (++hw->ctrl_out_idx >= HFC_CTRL_BUFSIZE)
 			hw->ctrl_out_idx = 0;	/* pointer wrap */
@@ -283,6 +283,7 @@ hfcsusb_ph_info(struct hfcsusb *hw)
 	_queue_data(&dch->dev.D, MPH_INFORMATION_IND, MISDN_ID_ANY,
 		sizeof(struct ph_info_dch) + dch->dev.nrbchan *
 		sizeof(struct ph_info_ch), phi, GFP_ATOMIC);
+	kfree(phi);
 }
 
 /*
@@ -1724,7 +1725,6 @@ hfcsusb_stop_endpoint(struct hfcsusb *hw, int channel)
 static int
 setup_hfcsusb(struct hfcsusb *hw)
 {
-	int err;
 	u_char b;
 
 	if (debug & DBG_HFC_CALL_TRACE)
@@ -1743,7 +1743,7 @@ setup_hfcsusb(struct hfcsusb *hw)
 	}
 
 	/* first set the needed config, interface and alternate */
-	err = usb_set_interface(hw->dev, hw->if_used, hw->alt_used);
+	(void) usb_set_interface(hw->dev, hw->if_used, hw->alt_used);
 
 	hw->led_state = 0;
 

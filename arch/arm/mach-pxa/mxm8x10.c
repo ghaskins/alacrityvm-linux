@@ -22,8 +22,8 @@
 #include <linux/serial_8250.h>
 #include <linux/dm9000.h>
 #include <linux/gpio.h>
+#include <linux/i2c/pxa-i2c.h>
 
-#include <plat/i2c.h>
 #include <plat/pxa3xx_nand.h>
 
 #include <mach/pxafb.h>
@@ -325,7 +325,7 @@ static mfp_cfg_t mfp_cfg[] __initdata = {
 #if defined(CONFIG_MMC)
 static struct pxamci_platform_data mxm_8x10_mci_platform_data = {
 	.ocr_mask = MMC_VDD_32_33 | MMC_VDD_33_34,
-	.detect_delay = 1,
+	.detect_delay_ms = 10,
 	.gpio_card_detect = MXM_8X10_SD_nCD,
 	.gpio_card_ro = MXM_8X10_SD_WP,
 	.gpio_power = -1
@@ -337,7 +337,7 @@ void __init mxm_8x10_mmc_init(void)
 }
 #endif
 
-/* USB Open Host Controler Interface */
+/* USB Open Host Controller Interface */
 static struct pxaohci_platform_data mxm_8x10_ohci_platform_data = {
 	.port_mode = PMM_NPS_MODE,
 	.flags = ENABLE_PORT_ALL
@@ -389,10 +389,11 @@ static struct mtd_partition mxm_8x10_nand_partitions[] = {
 };
 
 static struct pxa3xx_nand_platform_data mxm_8x10_nand_info = {
-	.enable_arbiter = 1,
-	.keep_config = 1,
-	.parts = mxm_8x10_nand_partitions,
-	.nr_parts = ARRAY_SIZE(mxm_8x10_nand_partitions)
+	.enable_arbiter	= 1,
+	.keep_config	= 1,
+	.num_cs		= 1,
+	.parts[0]	= mxm_8x10_nand_partitions,
+	.nr_parts[0]	= ARRAY_SIZE(mxm_8x10_nand_partitions)
 };
 
 static void __init mxm_8x10_nand_init(void)

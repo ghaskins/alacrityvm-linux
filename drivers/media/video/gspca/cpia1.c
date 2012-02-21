@@ -1,7 +1,7 @@
 /*
  * cpia CPiA (1) gspca driver
  *
- * Copyright (C) 2010 Hans de Goede <hdgoede@redhat.com>
+ * Copyright (C) 2010-2011 Hans de Goede <hdegoede@redhat.com>
  *
  * This module is adapted from the in kernel v4l1 cpia driver which is :
  *
@@ -26,18 +26,21 @@
  *
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #define MODULE_NAME "cpia1"
 
+#include <linux/input.h>
 #include "gspca.h"
 
-MODULE_AUTHOR("Hans de Goede <hdgoede@redhat.com>");
+MODULE_AUTHOR("Hans de Goede <hdegoede@redhat.com>");
 MODULE_DESCRIPTION("Vision CPiA");
 MODULE_LICENSE("GPL");
 
 /* constant value's */
 #define MAGIC_0		0x19
 #define MAGIC_1		0x68
-#define DATA_IN		0xC0
+#define DATA_IN		0xc0
 #define DATA_OUT	0x40
 #define VIDEOSIZE_QCIF	0	/* 176x144 */
 #define VIDEOSIZE_CIF	1	/* 352x288 */
@@ -373,9 +376,14 @@ static int sd_setfreq(struct gspca_dev *gspca_dev, __s32 val);
 static int sd_getfreq(struct gspca_dev *gspca_dev, __s32 *val);
 static int sd_setcomptarget(struct gspca_dev *gspca_dev, __s32 val);
 static int sd_getcomptarget(struct gspca_dev *gspca_dev, __s32 *val);
+static int sd_setilluminator1(struct gspca_dev *gspca_dev, __s32 val);
+static int sd_getilluminator1(struct gspca_dev *gspca_dev, __s32 *val);
+static int sd_setilluminator2(struct gspca_dev *gspca_dev, __s32 val);
+static int sd_getilluminator2(struct gspca_dev *gspca_dev, __s32 *val);
 
-static struct ctrl sd_ctrls[] = {
+static const struct ctrl sd_ctrls[] = {
 	{
+#define BRIGHTNESS_IDX 0
 	    {
 		.id      = V4L2_CID_BRIGHTNESS,
 		.type    = V4L2_CTRL_TYPE_INTEGER,
@@ -390,6 +398,7 @@ static struct ctrl sd_ctrls[] = {
 	    .set = sd_setbrightness,
 	    .get = sd_getbrightness,
 	},
+#define CONTRAST_IDX 1
 	{
 	    {
 		.id      = V4L2_CID_CONTRAST,
@@ -404,6 +413,7 @@ static struct ctrl sd_ctrls[] = {
 	    .set = sd_setcontrast,
 	    .get = sd_getcontrast,
 	},
+#define SATURATION_IDX 2
 	{
 	    {
 		.id      = V4L2_CID_SATURATION,
@@ -418,6 +428,7 @@ static struct ctrl sd_ctrls[] = {
 	    .set = sd_setsaturation,
 	    .get = sd_getsaturation,
 	},
+#define POWER_LINE_FREQUENCY_IDX 3
 	{
 		{
 			.id	 = V4L2_CID_POWER_LINE_FREQUENCY,
@@ -432,6 +443,37 @@ static struct ctrl sd_ctrls[] = {
 		.set = sd_setfreq,
 		.get = sd_getfreq,
 	},
+#define ILLUMINATORS_1_IDX 4
+	{
+		{
+			.id	 = V4L2_CID_ILLUMINATORS_1,
+			.type    = V4L2_CTRL_TYPE_BOOLEAN,
+			.name    = "Illuminator 1",
+			.minimum = 0,
+			.maximum = 1,
+			.step    = 1,
+#define ILLUMINATORS_1_DEF 0
+			.default_value = ILLUMINATORS_1_DEF,
+		},
+		.set = sd_setilluminator1,
+		.get = sd_getilluminator1,
+	},
+#define ILLUMINATORS_2_IDX 5
+	{
+		{
+			.id	 = V4L2_CID_ILLUMINATORS_2,
+			.type    = V4L2_CTRL_TYPE_BOOLEAN,
+			.name    = "Illuminator 2",
+			.minimum = 0,
+			.maximum = 1,
+			.step    = 1,
+#define ILLUMINATORS_2_DEF 0
+			.default_value = ILLUMINATORS_2_DEF,
+		},
+		.set = sd_setilluminator2,
+		.get = sd_getilluminator2,
+	},
+#define COMP_TARGET_IDX 6
 	{
 		{
 #define V4L2_CID_COMP_TARGET V4L2_CID_PRIVATE_BASE
@@ -510,8 +552,7 @@ retry:
 			      gspca_dev->usb_buf, databytes, 1000);
 
 	if (ret < 0)
-		PDEBUG(D_ERR, "usb_control_msg %02x, error %d", command[1],
-		       ret);
+		pr_err("usb_control_msg %02x, error %d\n", command[1], ret);
 
 	if (ret == -EPIPE && retries > 0) {
 		retries--;
@@ -614,16 +655,21 @@ static int do_command(struct gspca_dev *gspca_dev, u16 command,
 		break;
 
 	case CPIA_COMMAND_ReadMCPorts:
-		if (!sd->params.qx3.qx3_detected)
-			break;
 		/* test button press */
-		sd->params.qx3.button = ((gspca_dev->usb_buf[1] & 0x02) == 0);
+		a = ((gspca_dev->usb_buf[1] & 0x02) == 0);
+		if (a != sd->params.qx3.button) {
+#if defined(CONFIG_INPUT) || defined(CONFIG_INPUT_MODULE)
+			input_report_key(gspca_dev->input_dev, KEY_CAMERA, a);
+			input_sync(gspca_dev->input_dev);
+#endif
+	        	sd->params.qx3.button = a;
+		}
 		if (sd->params.qx3.button) {
 			/* button pressed - unlock the latch */
 			do_command(gspca_dev, CPIA_COMMAND_WriteMCPort,
-				   3, 0xDF, 0xDF, 0);
+				   3, 0xdf, 0xdf, 0);
 			do_command(gspca_dev, CPIA_COMMAND_WriteMCPort,
-				   3, 0xFF, 0xFF, 0);
+				   3, 0xff, 0xff, 0);
 		}
 
 		/* test whether microscope is cradled */
@@ -790,7 +836,7 @@ static int goto_low_power(struct gspca_dev *gspca_dev)
 	if (ret)
 		return ret;
 
-	do_command(gspca_dev, CPIA_COMMAND_GetCameraStatus, 0, 0, 0, 0);
+	ret = do_command(gspca_dev, CPIA_COMMAND_GetCameraStatus, 0, 0, 0, 0);
 	if (ret)
 		return ret;
 
@@ -861,7 +907,7 @@ static int save_camera_state(struct gspca_dev *gspca_dev)
 	return do_command(gspca_dev, CPIA_COMMAND_GetExposure, 0, 0, 0, 0);
 }
 
-int command_setformat(struct gspca_dev *gspca_dev)
+static int command_setformat(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 	int ret;
@@ -878,7 +924,7 @@ int command_setformat(struct gspca_dev *gspca_dev)
 			  sd->params.roi.rowStart, sd->params.roi.rowEnd);
 }
 
-int command_setcolourparams(struct gspca_dev *gspca_dev)
+static int command_setcolourparams(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 	return do_command(gspca_dev, CPIA_COMMAND_SetColourParams,
@@ -887,7 +933,7 @@ int command_setcolourparams(struct gspca_dev *gspca_dev)
 			  sd->params.colourParams.saturation, 0);
 }
 
-int command_setapcor(struct gspca_dev *gspca_dev)
+static int command_setapcor(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 	return do_command(gspca_dev, CPIA_COMMAND_SetApcor,
@@ -897,7 +943,7 @@ int command_setapcor(struct gspca_dev *gspca_dev)
 			  sd->params.apcor.gain8);
 }
 
-int command_setvloffset(struct gspca_dev *gspca_dev)
+static int command_setvloffset(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 	return do_command(gspca_dev, CPIA_COMMAND_SetVLOffset,
@@ -907,7 +953,7 @@ int command_setvloffset(struct gspca_dev *gspca_dev)
 			  sd->params.vlOffset.gain8);
 }
 
-int command_setexposure(struct gspca_dev *gspca_dev)
+static int command_setexposure(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 	int ret;
@@ -943,7 +989,7 @@ int command_setexposure(struct gspca_dev *gspca_dev)
 	return ret;
 }
 
-int command_setcolourbalance(struct gspca_dev *gspca_dev)
+static int command_setcolourbalance(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
@@ -973,7 +1019,7 @@ int command_setcolourbalance(struct gspca_dev *gspca_dev)
 	return -EINVAL;
 }
 
-int command_setcompressiontarget(struct gspca_dev *gspca_dev)
+static int command_setcompressiontarget(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
@@ -983,7 +1029,7 @@ int command_setcompressiontarget(struct gspca_dev *gspca_dev)
 			  sd->params.compressionTarget.targetQ, 0);
 }
 
-int command_setyuvtresh(struct gspca_dev *gspca_dev)
+static int command_setyuvtresh(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
@@ -992,7 +1038,7 @@ int command_setyuvtresh(struct gspca_dev *gspca_dev)
 			  sd->params.yuvThreshold.uvThreshold, 0, 0);
 }
 
-int command_setcompressionparams(struct gspca_dev *gspca_dev)
+static int command_setcompressionparams(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
@@ -1009,7 +1055,7 @@ int command_setcompressionparams(struct gspca_dev *gspca_dev)
 			    sd->params.compressionParams.decimationThreshMod);
 }
 
-int command_setcompression(struct gspca_dev *gspca_dev)
+static int command_setcompression(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
@@ -1018,7 +1064,7 @@ int command_setcompression(struct gspca_dev *gspca_dev)
 			  sd->params.compression.decimation, 0, 0);
 }
 
-int command_setsensorfps(struct gspca_dev *gspca_dev)
+static int command_setsensorfps(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
@@ -1027,7 +1073,7 @@ int command_setsensorfps(struct gspca_dev *gspca_dev)
 			  sd->params.sensorFps.baserate, 0, 0);
 }
 
-int command_setflickerctrl(struct gspca_dev *gspca_dev)
+static int command_setflickerctrl(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
@@ -1038,7 +1084,7 @@ int command_setflickerctrl(struct gspca_dev *gspca_dev)
 			  0);
 }
 
-int command_setecptiming(struct gspca_dev *gspca_dev)
+static int command_setecptiming(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
@@ -1046,12 +1092,12 @@ int command_setecptiming(struct gspca_dev *gspca_dev)
 			  sd->params.ecpTiming, 0, 0, 0);
 }
 
-int command_pause(struct gspca_dev *gspca_dev)
+static int command_pause(struct gspca_dev *gspca_dev)
 {
 	return do_command(gspca_dev, CPIA_COMMAND_EndStreamCap, 0, 0, 0, 0);
 }
 
-int command_resume(struct gspca_dev *gspca_dev)
+static int command_resume(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
@@ -1059,7 +1105,7 @@ int command_resume(struct gspca_dev *gspca_dev)
 			  0, sd->params.streamStartLine, 0, 0);
 }
 
-int command_setlights(struct gspca_dev *gspca_dev)
+static int command_setlights(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 	int ret, p1, p2;
@@ -1071,12 +1117,12 @@ int command_setlights(struct gspca_dev *gspca_dev)
 	p2 = (sd->params.qx3.toplight == 0) << 3;
 
 	ret = do_command(gspca_dev, CPIA_COMMAND_WriteVCReg,
-			 0x90, 0x8F, 0x50, 0);
+			 0x90, 0x8f, 0x50, 0);
 	if (ret)
 		return ret;
 
 	return do_command(gspca_dev, CPIA_COMMAND_WriteMCPort, 2, 0,
-			  p1 | p2 | 0xE0, 0);
+			  p1 | p2 | 0xe0, 0);
 }
 
 static int set_flicker(struct gspca_dev *gspca_dev, int on, int apply)
@@ -1217,7 +1263,7 @@ static int set_flicker(struct gspca_dev *gspca_dev, int on, int apply)
 static void monitor_exposure(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
-	u8 exp_acc, bcomp, gain, coarseL, cmd[8];
+	u8 exp_acc, bcomp, cmd[8];
 	int ret, light_exp, dark_exp, very_dark_exp;
 	int old_exposure, new_exposure, framerate;
 	int setfps = 0, setexp = 0, setflicker = 0;
@@ -1234,13 +1280,11 @@ static void monitor_exposure(struct gspca_dev *gspca_dev)
 	cmd[7] = 0;
 	ret = cpia_usb_transferCmd(gspca_dev, cmd);
 	if (ret) {
-		PDEBUG(D_ERR, "ReadVPRegs(30,4,9,8) - failed: %d", ret);
+		pr_err("ReadVPRegs(30,4,9,8) - failed: %d\n", ret);
 		return;
 	}
 	exp_acc = gspca_dev->usb_buf[0];
 	bcomp = gspca_dev->usb_buf[1];
-	gain = gspca_dev->usb_buf[2];
-	coarseL = gspca_dev->usb_buf[3];
 
 	light_exp = sd->params.colourParams.brightness +
 		    TC - 50 + EXP_ACC_LIGHT;
@@ -1361,7 +1405,7 @@ static void monitor_exposure(struct gspca_dev *gspca_dev)
 		if ((sd->exposure_status == EXPOSURE_VERY_DARK ||
 		     sd->exposure_status == EXPOSURE_DARK) &&
 		    sd->exposure_count >= DARK_TIME * framerate &&
-		    sd->params.sensorFps.divisor < 3) {
+		    sd->params.sensorFps.divisor < 2) {
 
 			/* dark for too long */
 			++sd->params.sensorFps.divisor;
@@ -1417,7 +1461,7 @@ static void monitor_exposure(struct gspca_dev *gspca_dev)
 		if ((sd->exposure_status == EXPOSURE_VERY_DARK ||
 		     sd->exposure_status == EXPOSURE_DARK) &&
 		    sd->exposure_count >= DARK_TIME * framerate &&
-		    sd->params.sensorFps.divisor < 3) {
+		    sd->params.sensorFps.divisor < 2) {
 
 			/* dark for too long */
 			++sd->params.sensorFps.divisor;
@@ -1699,6 +1743,8 @@ static int sd_start(struct gspca_dev *gspca_dev)
 
 static void sd_stopN(struct gspca_dev *gspca_dev)
 {
+	struct sd *sd = (struct sd *) gspca_dev;
+
 	command_pause(gspca_dev);
 
 	/* save camera state for later open (developers guide ch 3.5.3) */
@@ -1709,6 +1755,17 @@ static void sd_stopN(struct gspca_dev *gspca_dev)
 
 	/* Update the camera status */
 	do_command(gspca_dev, CPIA_COMMAND_GetCameraStatus, 0, 0, 0, 0);
+
+#if defined(CONFIG_INPUT) || defined(CONFIG_INPUT_MODULE)
+	/* If the last button state is pressed, release it now! */
+	if (sd->params.qx3.button) {
+		/* The camera latch will hold the pressed state until we reset
+		   the latch, so we do not reset sd->params.qx3.button now, to
+		   avoid a false keypress being reported the next sd_start */
+		input_report_key(gspca_dev->input_dev, KEY_CAMERA, 0);
+		input_sync(gspca_dev->input_dev);
+	}
+#endif
 }
 
 /* this function is called at probe and resume time */
@@ -1723,6 +1780,14 @@ static int sd_init(struct gspca_dev *gspca_dev)
 	ret = sd_start(gspca_dev);
 	if (ret)
 		return ret;
+
+	/* Ensure the QX3 illuminators' states are restored upon resume,
+	   or disable the illuminator controls, if this isn't a QX3 */
+	if (sd->params.qx3.qx3_detected)
+		command_setlights(gspca_dev);
+	else
+		gspca_dev->ctrl_dis |=
+			((1 << ILLUMINATORS_1_IDX) | (1 << ILLUMINATORS_2_IDX));
 
 	sd_stopN(gspca_dev);
 
@@ -1758,22 +1823,19 @@ static void sd_pkt_scan(struct gspca_dev *gspca_dev,
 	    data[25] == sd->params.roi.colEnd &&
 	    data[26] == sd->params.roi.rowStart &&
 	    data[27] == sd->params.roi.rowEnd) {
-		struct gspca_frame *frame = gspca_get_i_frame(gspca_dev);
+		u8 *image;
 
 		atomic_set(&sd->cam_exposure, data[39] * 2);
 		atomic_set(&sd->fps, data[41]);
 
-		if (frame == NULL) {
-			gspca_dev->last_packet_type = DISCARD_PACKET;
-			return;
-		}
-
 		/* Check for proper EOF for last frame */
-		if ((frame->data_end - frame->data) > 4 &&
-		    frame->data_end[-4] == 0xff &&
-		    frame->data_end[-3] == 0xff &&
-		    frame->data_end[-2] == 0xff &&
-		    frame->data_end[-1] == 0xff)
+		image = gspca_dev->image;
+		if (image != NULL &&
+		    gspca_dev->image_len > 4 &&
+		    image[gspca_dev->image_len - 4] == 0xff &&
+		    image[gspca_dev->image_len - 3] == 0xff &&
+		    image[gspca_dev->image_len - 2] == 0xff &&
+		    image[gspca_dev->image_len - 1] == 0xff)
 			gspca_frame_add(gspca_dev, LAST_PACKET,
 						NULL, 0);
 
@@ -1806,8 +1868,7 @@ static void sd_dq_callback(struct gspca_dev *gspca_dev)
 
 	/* Update our knowledge of the camera state */
 	do_command(gspca_dev, CPIA_COMMAND_GetExposure, 0, 0, 0, 0);
-	if (sd->params.qx3.qx3_detected)
-		do_command(gspca_dev, CPIA_COMMAND_ReadMCPorts, 0, 0, 0, 0);
+	do_command(gspca_dev, CPIA_COMMAND_ReadMCPorts, 0, 0, 0, 0);
 }
 
 static int sd_setbrightness(struct gspca_dev *gspca_dev, __s32 val)
@@ -1930,6 +1991,72 @@ static int sd_getcomptarget(struct gspca_dev *gspca_dev, __s32 *val)
 	return 0;
 }
 
+static int sd_setilluminator(struct gspca_dev *gspca_dev, __s32 val, int n)
+{
+	struct sd *sd = (struct sd *) gspca_dev;
+	int ret;
+
+	if (!sd->params.qx3.qx3_detected)
+		return -EINVAL;
+
+	switch (n) {
+	case 1:
+		sd->params.qx3.bottomlight = val ? 1 : 0;
+		break;
+	case 2:
+		sd->params.qx3.toplight = val ? 1 : 0;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	ret = command_setlights(gspca_dev);
+	if (ret && ret != -EINVAL)
+		ret = -EBUSY;
+
+	return ret;
+}
+
+static int sd_setilluminator1(struct gspca_dev *gspca_dev, __s32 val)
+{
+	return sd_setilluminator(gspca_dev, val, 1);
+}
+
+static int sd_setilluminator2(struct gspca_dev *gspca_dev, __s32 val)
+{
+	return sd_setilluminator(gspca_dev, val, 2);
+}
+
+static int sd_getilluminator(struct gspca_dev *gspca_dev, __s32 *val, int n)
+{
+	struct sd *sd = (struct sd *) gspca_dev;
+
+	if (!sd->params.qx3.qx3_detected)
+		return -EINVAL;
+
+	switch (n) {
+	case 1:
+		*val = sd->params.qx3.bottomlight;
+		break;
+	case 2:
+		*val = sd->params.qx3.toplight;
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static int sd_getilluminator1(struct gspca_dev *gspca_dev, __s32 *val)
+{
+	return sd_getilluminator(gspca_dev, val, 1);
+}
+
+static int sd_getilluminator2(struct gspca_dev *gspca_dev, __s32 *val)
+{
+	return sd_getilluminator(gspca_dev, val, 2);
+}
+
 static int sd_querymenu(struct gspca_dev *gspca_dev,
 			struct v4l2_querymenu *menu)
 {
@@ -1973,10 +2100,13 @@ static const struct sd_desc sd_desc = {
 	.dq_callback = sd_dq_callback,
 	.pkt_scan = sd_pkt_scan,
 	.querymenu = sd_querymenu,
+#if defined(CONFIG_INPUT) || defined(CONFIG_INPUT_MODULE)
+	.other_input = 1,
+#endif
 };
 
 /* -- module initialisation -- */
-static const __devinitdata struct usb_device_id device_table[] = {
+static const struct usb_device_id device_table[] = {
 	{USB_DEVICE(0x0553, 0x0002)},
 	{USB_DEVICE(0x0813, 0x0001)},
 	{}
@@ -2005,17 +2135,11 @@ static struct usb_driver sd_driver = {
 /* -- module insert / remove -- */
 static int __init sd_mod_init(void)
 {
-	int ret;
-	ret = usb_register(&sd_driver);
-	if (ret < 0)
-		return ret;
-	PDEBUG(D_PROBE, "registered");
-	return 0;
+	return usb_register(&sd_driver);
 }
 static void __exit sd_mod_exit(void)
 {
 	usb_deregister(&sd_driver);
-	PDEBUG(D_PROBE, "deregistered");
 }
 
 module_init(sd_mod_init);

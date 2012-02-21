@@ -43,7 +43,7 @@ static u32 orig_pci_err_en;
 #endif
 
 static u32 orig_l2_err_disable;
-#ifdef CONFIG_MPC85xx
+#ifdef CONFIG_FSL_SOC_BOOKE
 static u32 orig_hid1[2];
 #endif
 
@@ -200,8 +200,7 @@ static irqreturn_t mpc85xx_pci_isr(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static int __devinit mpc85xx_pci_err_probe(struct of_device *op,
-					   const struct of_device_id *match)
+static int __devinit mpc85xx_pci_err_probe(struct platform_device *op)
 {
 	struct edac_pci_ctl_info *pci;
 	struct mpc85xx_pci_pdata *pdata;
@@ -229,7 +228,7 @@ static int __devinit mpc85xx_pci_err_probe(struct of_device *op,
 
 	pdata->edac_idx = edac_pci_idx++;
 
-	res = of_address_to_resource(op->node, 0, &r);
+	res = of_address_to_resource(op->dev.of_node, 0, &r);
 	if (res) {
 		printk(KERN_ERR "%s: Unable to get resource for "
 		       "PCI err regs\n", __func__);
@@ -274,7 +273,7 @@ static int __devinit mpc85xx_pci_err_probe(struct of_device *op,
 	}
 
 	if (edac_op_state == EDAC_OPSTATE_INT) {
-		pdata->irq = irq_of_parse_and_map(op->node, 0);
+		pdata->irq = irq_of_parse_and_map(op->dev.of_node, 0);
 		res = devm_request_irq(&op->dev, pdata->irq,
 				       mpc85xx_pci_isr, IRQF_DISABLED,
 				       "[EDAC] PCI err", pci);
@@ -305,7 +304,7 @@ err:
 	return res;
 }
 
-static int mpc85xx_pci_err_remove(struct of_device *op)
+static int mpc85xx_pci_err_remove(struct platform_device *op)
 {
 	struct edac_pci_ctl_info *pci = dev_get_drvdata(&op->dev);
 	struct mpc85xx_pci_pdata *pdata = pci->pvt_info;
@@ -336,17 +335,16 @@ static struct of_device_id mpc85xx_pci_err_of_match[] = {
 	},
 	{},
 };
+MODULE_DEVICE_TABLE(of, mpc85xx_pci_err_of_match);
 
-static struct of_platform_driver mpc85xx_pci_err_driver = {
-	.owner = THIS_MODULE,
-	.name = "mpc85xx_pci_err",
-	.match_table = mpc85xx_pci_err_of_match,
+static struct platform_driver mpc85xx_pci_err_driver = {
 	.probe = mpc85xx_pci_err_probe,
 	.remove = __devexit_p(mpc85xx_pci_err_remove),
 	.driver = {
-		   .name = "mpc85xx_pci_err",
-		   .owner = THIS_MODULE,
-		   },
+		.name = "mpc85xx_pci_err",
+		.owner = THIS_MODULE,
+		.of_match_table = mpc85xx_pci_err_of_match,
+	},
 };
 
 #endif				/* CONFIG_PCI */
@@ -504,8 +502,7 @@ static irqreturn_t mpc85xx_l2_isr(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static int __devinit mpc85xx_l2_err_probe(struct of_device *op,
-					  const struct of_device_id *match)
+static int __devinit mpc85xx_l2_err_probe(struct platform_device *op)
 {
 	struct edac_device_ctl_info *edac_dev;
 	struct mpc85xx_l2_pdata *pdata;
@@ -531,7 +528,7 @@ static int __devinit mpc85xx_l2_err_probe(struct of_device *op,
 	edac_dev->ctl_name = pdata->name;
 	edac_dev->dev_name = pdata->name;
 
-	res = of_address_to_resource(op->node, 0, &r);
+	res = of_address_to_resource(op->dev.of_node, 0, &r);
 	if (res) {
 		printk(KERN_ERR "%s: Unable to get resource for "
 		       "L2 err regs\n", __func__);
@@ -541,15 +538,15 @@ static int __devinit mpc85xx_l2_err_probe(struct of_device *op,
 	/* we only need the error registers */
 	r.start += 0xe00;
 
-	if (!devm_request_mem_region(&op->dev, r.start,
-				     r.end - r.start + 1, pdata->name)) {
+	if (!devm_request_mem_region(&op->dev, r.start, resource_size(&r),
+				     pdata->name)) {
 		printk(KERN_ERR "%s: Error while requesting mem region\n",
 		       __func__);
 		res = -EBUSY;
 		goto err;
 	}
 
-	pdata->l2_vbase = devm_ioremap(&op->dev, r.start, r.end - r.start + 1);
+	pdata->l2_vbase = devm_ioremap(&op->dev, r.start, resource_size(&r));
 	if (!pdata->l2_vbase) {
 		printk(KERN_ERR "%s: Unable to setup L2 err regs\n", __func__);
 		res = -ENOMEM;
@@ -578,7 +575,7 @@ static int __devinit mpc85xx_l2_err_probe(struct of_device *op,
 	}
 
 	if (edac_op_state == EDAC_OPSTATE_INT) {
-		pdata->irq = irq_of_parse_and_map(op->node, 0);
+		pdata->irq = irq_of_parse_and_map(op->dev.of_node, 0);
 		res = devm_request_irq(&op->dev, pdata->irq,
 				       mpc85xx_l2_isr, IRQF_DISABLED,
 				       "[EDAC] L2 err", edac_dev);
@@ -614,7 +611,7 @@ err:
 	return res;
 }
 
-static int mpc85xx_l2_err_remove(struct of_device *op)
+static int mpc85xx_l2_err_remove(struct platform_device *op)
 {
 	struct edac_device_ctl_info *edac_dev = dev_get_drvdata(&op->dev);
 	struct mpc85xx_l2_pdata *pdata = edac_dev->pvt_info;
@@ -648,21 +645,23 @@ static struct of_device_id mpc85xx_l2_err_of_match[] = {
 	{ .compatible = "fsl,mpc8555-l2-cache-controller", },
 	{ .compatible = "fsl,mpc8560-l2-cache-controller", },
 	{ .compatible = "fsl,mpc8568-l2-cache-controller", },
+	{ .compatible = "fsl,mpc8569-l2-cache-controller", },
 	{ .compatible = "fsl,mpc8572-l2-cache-controller", },
+	{ .compatible = "fsl,p1020-l2-cache-controller", },
+	{ .compatible = "fsl,p1021-l2-cache-controller", },
 	{ .compatible = "fsl,p2020-l2-cache-controller", },
 	{},
 };
+MODULE_DEVICE_TABLE(of, mpc85xx_l2_err_of_match);
 
-static struct of_platform_driver mpc85xx_l2_err_driver = {
-	.owner = THIS_MODULE,
-	.name = "mpc85xx_l2_err",
-	.match_table = mpc85xx_l2_err_of_match,
+static struct platform_driver mpc85xx_l2_err_driver = {
 	.probe = mpc85xx_l2_err_probe,
 	.remove = mpc85xx_l2_err_remove,
 	.driver = {
-		   .name = "mpc85xx_l2_err",
-		   .owner = THIS_MODULE,
-		   },
+		.name = "mpc85xx_l2_err",
+		.owner = THIS_MODULE,
+		.of_match_table = mpc85xx_l2_err_of_match,
+	},
 };
 
 /**************************** MC Err device ***************************/
@@ -855,11 +854,11 @@ static void mpc85xx_mc_check(struct mem_ctl_info *mci)
 		mpc85xx_mc_printk(mci, KERN_ERR, "PFN out of range!\n");
 
 	if (err_detect & DDR_EDE_SBE)
-		edac_mc_handle_ce(mci, pfn, err_addr & PAGE_MASK,
+		edac_mc_handle_ce(mci, pfn, err_addr & ~PAGE_MASK,
 				  syndrome, row_index, 0, mci->ctl_name);
 
 	if (err_detect & DDR_EDE_MBE)
-		edac_mc_handle_ue(mci, pfn, err_addr & PAGE_MASK,
+		edac_mc_handle_ue(mci, pfn, err_addr & ~PAGE_MASK,
 				  row_index, mci->ctl_name);
 
 	out_be32(pdata->mc_vbase + MPC85XX_MC_ERR_DETECT, err_detect);
@@ -955,8 +954,7 @@ static void __devinit mpc85xx_init_csrows(struct mem_ctl_info *mci)
 	}
 }
 
-static int __devinit mpc85xx_mc_err_probe(struct of_device *op,
-					  const struct of_device_id *match)
+static int __devinit mpc85xx_mc_err_probe(struct platform_device *op)
 {
 	struct mem_ctl_info *mci;
 	struct mpc85xx_mc_pdata *pdata;
@@ -982,22 +980,22 @@ static int __devinit mpc85xx_mc_err_probe(struct of_device *op,
 	mci->ctl_name = pdata->name;
 	mci->dev_name = pdata->name;
 
-	res = of_address_to_resource(op->node, 0, &r);
+	res = of_address_to_resource(op->dev.of_node, 0, &r);
 	if (res) {
 		printk(KERN_ERR "%s: Unable to get resource for MC err regs\n",
 		       __func__);
 		goto err;
 	}
 
-	if (!devm_request_mem_region(&op->dev, r.start,
-				     r.end - r.start + 1, pdata->name)) {
+	if (!devm_request_mem_region(&op->dev, r.start, resource_size(&r),
+				     pdata->name)) {
 		printk(KERN_ERR "%s: Error while requesting mem region\n",
 		       __func__);
 		res = -EBUSY;
 		goto err;
 	}
 
-	pdata->mc_vbase = devm_ioremap(&op->dev, r.start, r.end - r.start + 1);
+	pdata->mc_vbase = devm_ioremap(&op->dev, r.start, resource_size(&r));
 	if (!pdata->mc_vbase) {
 		printk(KERN_ERR "%s: Unable to setup MC err regs\n", __func__);
 		res = -ENOMEM;
@@ -1056,7 +1054,7 @@ static int __devinit mpc85xx_mc_err_probe(struct of_device *op,
 		out_be32(pdata->mc_vbase + MPC85XX_MC_ERR_SBE, 0x10000);
 
 		/* register interrupts */
-		pdata->irq = irq_of_parse_and_map(op->node, 0);
+		pdata->irq = irq_of_parse_and_map(op->dev.of_node, 0);
 		res = devm_request_irq(&op->dev, pdata->irq,
 				       mpc85xx_mc_isr,
 					IRQF_DISABLED | IRQF_SHARED,
@@ -1087,7 +1085,7 @@ err:
 	return res;
 }
 
-static int mpc85xx_mc_err_remove(struct of_device *op)
+static int mpc85xx_mc_err_remove(struct platform_device *op)
 {
 	struct mem_ctl_info *mci = dev_get_drvdata(&op->dev);
 	struct mpc85xx_mc_pdata *pdata = mci->pvt_info;
@@ -1124,35 +1122,39 @@ static struct of_device_id mpc85xx_mc_err_of_match[] = {
 	{ .compatible = "fsl,mpc8555-memory-controller", },
 	{ .compatible = "fsl,mpc8560-memory-controller", },
 	{ .compatible = "fsl,mpc8568-memory-controller", },
+	{ .compatible = "fsl,mpc8569-memory-controller", },
 	{ .compatible = "fsl,mpc8572-memory-controller", },
 	{ .compatible = "fsl,mpc8349-memory-controller", },
+	{ .compatible = "fsl,p1020-memory-controller", },
+	{ .compatible = "fsl,p1021-memory-controller", },
 	{ .compatible = "fsl,p2020-memory-controller", },
+	{ .compatible = "fsl,qoriq-memory-controller", },
 	{},
 };
+MODULE_DEVICE_TABLE(of, mpc85xx_mc_err_of_match);
 
-static struct of_platform_driver mpc85xx_mc_err_driver = {
-	.owner = THIS_MODULE,
-	.name = "mpc85xx_mc_err",
-	.match_table = mpc85xx_mc_err_of_match,
+static struct platform_driver mpc85xx_mc_err_driver = {
 	.probe = mpc85xx_mc_err_probe,
 	.remove = mpc85xx_mc_err_remove,
 	.driver = {
-		   .name = "mpc85xx_mc_err",
-		   .owner = THIS_MODULE,
-		   },
+		.name = "mpc85xx_mc_err",
+		.owner = THIS_MODULE,
+		.of_match_table = mpc85xx_mc_err_of_match,
+	},
 };
 
-#ifdef CONFIG_MPC85xx
+#ifdef CONFIG_FSL_SOC_BOOKE
 static void __init mpc85xx_mc_clear_rfxe(void *data)
 {
 	orig_hid1[smp_processor_id()] = mfspr(SPRN_HID1);
-	mtspr(SPRN_HID1, (orig_hid1[smp_processor_id()] & ~0x20000));
+	mtspr(SPRN_HID1, (orig_hid1[smp_processor_id()] & ~HID1_RFXE));
 }
 #endif
 
 static int __init mpc85xx_mc_init(void)
 {
 	int res = 0;
+	u32 pvr = 0;
 
 	printk(KERN_INFO "Freescale(R) MPC85xx EDAC driver, "
 	       "(C) 2006 Montavista Software\n");
@@ -1167,27 +1169,32 @@ static int __init mpc85xx_mc_init(void)
 		break;
 	}
 
-	res = of_register_platform_driver(&mpc85xx_mc_err_driver);
+	res = platform_driver_register(&mpc85xx_mc_err_driver);
 	if (res)
 		printk(KERN_WARNING EDAC_MOD_STR "MC fails to register\n");
 
-	res = of_register_platform_driver(&mpc85xx_l2_err_driver);
+	res = platform_driver_register(&mpc85xx_l2_err_driver);
 	if (res)
 		printk(KERN_WARNING EDAC_MOD_STR "L2 fails to register\n");
 
 #ifdef CONFIG_PCI
-	res = of_register_platform_driver(&mpc85xx_pci_err_driver);
+	res = platform_driver_register(&mpc85xx_pci_err_driver);
 	if (res)
 		printk(KERN_WARNING EDAC_MOD_STR "PCI fails to register\n");
 #endif
 
-#ifdef CONFIG_MPC85xx
-	/*
-	 * need to clear HID1[RFXE] to disable machine check int
-	 * so we can catch it
-	 */
-	if (edac_op_state == EDAC_OPSTATE_INT)
-		on_each_cpu(mpc85xx_mc_clear_rfxe, NULL, 0);
+#ifdef CONFIG_FSL_SOC_BOOKE
+	pvr = mfspr(SPRN_PVR);
+
+	if ((PVR_VER(pvr) == PVR_VER_E500V1) ||
+	    (PVR_VER(pvr) == PVR_VER_E500V2)) {
+		/*
+		 * need to clear HID1[RFXE] to disable machine check int
+		 * so we can catch it
+		 */
+		if (edac_op_state == EDAC_OPSTATE_INT)
+			on_each_cpu(mpc85xx_mc_clear_rfxe, NULL, 0);
+	}
 #endif
 
 	return 0;
@@ -1195,7 +1202,7 @@ static int __init mpc85xx_mc_init(void)
 
 module_init(mpc85xx_mc_init);
 
-#ifdef CONFIG_MPC85xx
+#ifdef CONFIG_FSL_SOC_BOOKE
 static void __exit mpc85xx_mc_restore_hid1(void *data)
 {
 	mtspr(SPRN_HID1, orig_hid1[smp_processor_id()]);
@@ -1204,14 +1211,19 @@ static void __exit mpc85xx_mc_restore_hid1(void *data)
 
 static void __exit mpc85xx_mc_exit(void)
 {
-#ifdef CONFIG_MPC85xx
-	on_each_cpu(mpc85xx_mc_restore_hid1, NULL, 0);
+#ifdef CONFIG_FSL_SOC_BOOKE
+	u32 pvr = mfspr(SPRN_PVR);
+
+	if ((PVR_VER(pvr) == PVR_VER_E500V1) ||
+	    (PVR_VER(pvr) == PVR_VER_E500V2)) {
+		on_each_cpu(mpc85xx_mc_restore_hid1, NULL, 0);
+	}
 #endif
 #ifdef CONFIG_PCI
-	of_unregister_platform_driver(&mpc85xx_pci_err_driver);
+	platform_driver_unregister(&mpc85xx_pci_err_driver);
 #endif
-	of_unregister_platform_driver(&mpc85xx_l2_err_driver);
-	of_unregister_platform_driver(&mpc85xx_mc_err_driver);
+	platform_driver_unregister(&mpc85xx_l2_err_driver);
+	platform_driver_unregister(&mpc85xx_mc_err_driver);
 }
 
 module_exit(mpc85xx_mc_exit);

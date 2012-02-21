@@ -72,18 +72,18 @@ int radeon_cs_parser_relocs(struct radeon_cs_parser *p)
 			if (p->relocs[i].gobj == NULL) {
 				DRM_ERROR("gem object lookup failed 0x%x\n",
 					  r->handle);
-				return -EINVAL;
+				return -ENOENT;
 			}
 			p->relocs_ptr[i] = &p->relocs[i];
-			p->relocs[i].robj = p->relocs[i].gobj->driver_private;
+			p->relocs[i].robj = gem_to_radeon_bo(p->relocs[i].gobj);
 			p->relocs[i].lobj.bo = p->relocs[i].robj;
-			p->relocs[i].lobj.rdomain = r->read_domains;
 			p->relocs[i].lobj.wdomain = r->write_domain;
+			p->relocs[i].lobj.rdomain = r->read_domains;
+			p->relocs[i].lobj.tv.bo = &p->relocs[i].robj->tbo;
 			p->relocs[i].handle = r->handle;
 			p->relocs[i].flags = r->flags;
-			INIT_LIST_HEAD(&p->relocs[i].lobj.list);
 			radeon_bo_list_add_object(&p->relocs[i].lobj,
-						&p->validated);
+						  &p->validated);
 		}
 	}
 	return radeon_bo_list_validate(&p->validated);
@@ -93,7 +93,7 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 {
 	struct drm_radeon_cs *cs = data;
 	uint64_t *chunk_array_ptr;
-	unsigned size, i;
+	unsigned size, i, flags = 0;
 
 	if (!cs->num_chunks) {
 		return 0;
@@ -140,6 +140,10 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 			if (p->chunks[i].length_dw == 0)
 				return -EINVAL;
 		}
+		if (p->chunks[i].chunk_id == RADEON_CHUNK_ID_FLAGS &&
+		    !p->chunks[i].length_dw) {
+			return -EINVAL;
+		}
 
 		p->chunks[i].length_dw = user_chunk.length_dw;
 		p->chunks[i].user_ptr = (void __user *)(unsigned long)user_chunk.chunk_data;
@@ -154,6 +158,9 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 			if (DRM_COPY_FROM_USER(p->chunks[i].kdata,
 					       p->chunks[i].user_ptr, size)) {
 				return -EFAULT;
+			}
+			if (p->chunks[i].chunk_id == RADEON_CHUNK_ID_FLAGS) {
+				flags = p->chunks[i].kdata[0];
 			}
 		} else {
 			p->chunks[i].kpage[0] = kmalloc(PAGE_SIZE, GFP_KERNEL);
@@ -174,6 +181,8 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 			  p->chunks[p->chunk_ib_idx].length_dw);
 		return -EINVAL;
 	}
+
+	p->keep_tiling_flags = (flags & RADEON_CS_KEEP_TILING_FLAGS) != 0;
 	return 0;
 }
 
@@ -189,10 +198,13 @@ static void radeon_cs_parser_fini(struct radeon_cs_parser *parser, int error)
 {
 	unsigned i;
 
-	if (!error && parser->ib) {
-		radeon_bo_list_fence(&parser->validated, parser->ib->fence);
-	}
-	radeon_bo_list_unreserve(&parser->validated);
+
+	if (!error && parser->ib)
+		ttm_eu_fence_buffer_objects(&parser->validated,
+					    parser->ib->fence);
+	else
+		ttm_eu_backoff_reservation(&parser->validated);
+
 	if (parser->relocs != NULL) {
 		for (i = 0; i < parser->nrelocs; i++) {
 			if (parser->relocs[i].gobj)
@@ -219,28 +231,25 @@ int radeon_cs_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 	struct radeon_cs_chunk *ib_chunk;
 	int r;
 
-	mutex_lock(&rdev->cs_mutex);
-	if (rdev->gpu_lockup) {
-		mutex_unlock(&rdev->cs_mutex);
-		return -EINVAL;
-	}
+	radeon_mutex_lock(&rdev->cs_mutex);
 	/* initialize parser */
 	memset(&parser, 0, sizeof(struct radeon_cs_parser));
 	parser.filp = filp;
 	parser.rdev = rdev;
 	parser.dev = rdev->dev;
+	parser.family = rdev->family;
 	r = radeon_cs_parser_init(&parser, data);
 	if (r) {
 		DRM_ERROR("Failed to initialize parser !\n");
 		radeon_cs_parser_fini(&parser, r);
-		mutex_unlock(&rdev->cs_mutex);
+		radeon_mutex_unlock(&rdev->cs_mutex);
 		return r;
 	}
 	r =  radeon_ib_get(rdev, &parser.ib);
 	if (r) {
 		DRM_ERROR("Failed to get ib !\n");
 		radeon_cs_parser_fini(&parser, r);
-		mutex_unlock(&rdev->cs_mutex);
+		radeon_mutex_unlock(&rdev->cs_mutex);
 		return r;
 	}
 	r = radeon_cs_parser_relocs(&parser);
@@ -248,7 +257,7 @@ int radeon_cs_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 		if (r != -ERESTARTSYS)
 			DRM_ERROR("Failed to parse relocation %d!\n", r);
 		radeon_cs_parser_fini(&parser, r);
-		mutex_unlock(&rdev->cs_mutex);
+		radeon_mutex_unlock(&rdev->cs_mutex);
 		return r;
 	}
 	/* Copy the packet into the IB, the parser will read from the
@@ -260,22 +269,22 @@ int radeon_cs_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 	if (r || parser.parser_error) {
 		DRM_ERROR("Invalid command stream !\n");
 		radeon_cs_parser_fini(&parser, r);
-		mutex_unlock(&rdev->cs_mutex);
+		radeon_mutex_unlock(&rdev->cs_mutex);
 		return r;
 	}
 	r = radeon_cs_finish_pages(&parser);
 	if (r) {
 		DRM_ERROR("Invalid command stream !\n");
 		radeon_cs_parser_fini(&parser, r);
-		mutex_unlock(&rdev->cs_mutex);
+		radeon_mutex_unlock(&rdev->cs_mutex);
 		return r;
 	}
 	r = radeon_ib_schedule(rdev, parser.ib);
 	if (r) {
-		DRM_ERROR("Faild to schedule IB !\n");
+		DRM_ERROR("Failed to schedule IB !\n");
 	}
 	radeon_cs_parser_fini(&parser, r);
-	mutex_unlock(&rdev->cs_mutex);
+	radeon_mutex_unlock(&rdev->cs_mutex);
 	return r;
 }
 

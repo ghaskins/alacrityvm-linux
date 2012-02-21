@@ -43,6 +43,8 @@ SECTIONS
 
 	NOTES :text :note
 
+	.dummy : { *(.dummy) } :data
+
 	RODATA
 
 #ifdef CONFIG_SHARED_KERNEL
@@ -77,7 +79,7 @@ SECTIONS
 	. = ALIGN(PAGE_SIZE);
 	INIT_DATA_SECTION(0x100)
 
-	PERCPU(PAGE_SIZE)
+	PERCPU_SECTION(0x100)
 	. = ALIGN(PAGE_SIZE);
 	__init_end = .;		/* freed after init ends here */
 

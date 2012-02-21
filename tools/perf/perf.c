@@ -13,7 +13,6 @@
 #include "util/quote.h"
 #include "util/run-command.h"
 #include "util/parse-events.h"
-#include "util/string.h"
 #include "util/debugfs.h"
 
 const char perf_usage_string[] =
@@ -22,7 +21,9 @@ const char perf_usage_string[] =
 const char perf_more_info_string[] =
 	"See 'perf help COMMAND' for more information on a specific command.";
 
+int use_browser = -1;
 static int use_pager = -1;
+
 struct pager_config {
 	const char *cmd;
 	int val;
@@ -45,6 +46,24 @@ int check_pager_config(const char *cmd)
 	c.cmd = cmd;
 	c.val = -1;
 	perf_config(pager_command_config, &c);
+	return c.val;
+}
+
+static int tui_command_config(const char *var, const char *value, void *data)
+{
+	struct pager_config *c = data;
+	if (!prefixcmp(var, "tui.") && !strcmp(var + 4, c->cmd))
+		c->val = perf_config_bool(var, value);
+	return 0;
+}
+
+/* returns 0 for "no tui", 1 for "use tui", and -1 for "not specified" */
+static int check_tui_config(const char *cmd)
+{
+	struct pager_config c;
+	c.cmd = cmd;
+	c.val = -1;
+	perf_config(tui_command_config, &c);
 	return c.val;
 }
 
@@ -254,6 +273,9 @@ static int run_builtin(struct cmd_struct *p, int argc, const char **argv)
 	if (p->option & RUN_SETUP)
 		prefix = NULL; /* setup_perf_directory(); */
 
+	if (use_browser == -1)
+		use_browser = check_tui_config(p->cmd);
+
 	if (use_pager == -1 && p->option & RUN_SETUP)
 		use_pager = check_pager_config(p->cmd);
 	if (use_pager == -1 && p->option & USE_PAGER)
@@ -262,6 +284,8 @@ static int run_builtin(struct cmd_struct *p, int argc, const char **argv)
 	set_debugfs_path();
 
 	status = p->fn(argc, argv, prefix);
+	exit_browser(status);
+
 	if (status)
 		return status & 0xff;
 
@@ -289,6 +313,7 @@ static void handle_internal_command(int argc, const char **argv)
 		{ "buildid-cache", cmd_buildid_cache, 0 },
 		{ "buildid-list", cmd_buildid_list, 0 },
 		{ "diff",	cmd_diff,	0 },
+		{ "evlist",	cmd_evlist,	0 },
 		{ "help",	cmd_help,	0 },
 		{ "list",	cmd_list,	0 },
 		{ "record",	cmd_record,	0 },
@@ -299,11 +324,14 @@ static void handle_internal_command(int argc, const char **argv)
 		{ "top",	cmd_top,	0 },
 		{ "annotate",	cmd_annotate,	0 },
 		{ "version",	cmd_version,	0 },
-		{ "trace",	cmd_trace,	0 },
+		{ "script",	cmd_script,	0 },
 		{ "sched",	cmd_sched,	0 },
 		{ "probe",	cmd_probe,	0 },
 		{ "kmem",	cmd_kmem,	0 },
 		{ "lock",	cmd_lock,	0 },
+		{ "kvm",	cmd_kvm,	0 },
+		{ "test",	cmd_test,	0 },
+		{ "inject",	cmd_inject,	0 },
 	};
 	unsigned int i;
 	static const char ext[] = STRIP_EXTENSION;
@@ -399,6 +427,24 @@ static void get_debugfs_mntpt(void)
 		debugfs_mntpt[0] = '\0';
 }
 
+static void pthread__block_sigwinch(void)
+{
+	sigset_t set;
+
+	sigemptyset(&set);
+	sigaddset(&set, SIGWINCH);
+	pthread_sigmask(SIG_BLOCK, &set, NULL);
+}
+
+void pthread__unblock_sigwinch(void)
+{
+	sigset_t set;
+
+	sigemptyset(&set);
+	sigaddset(&set, SIGWINCH);
+	pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+}
+
 int main(int argc, const char **argv)
 {
 	const char *cmd;
@@ -431,6 +477,8 @@ int main(int argc, const char **argv)
 	handle_options(&argv, &argc, NULL);
 	commit_pager_choice();
 	set_debugfs_path();
+	set_buildid_dir();
+
 	if (argc > 0) {
 		if (!prefixcmp(argv[0], "--"))
 			argv[0] += 2;
@@ -450,6 +498,12 @@ int main(int argc, const char **argv)
 	 * time.
 	 */
 	setup_path();
+	/*
+	 * Block SIGWINCH notifications so that the thread that wants it can
+	 * unblock and get syscalls like select interrupted instead of waiting
+	 * forever while the signal goes to some other non interested thread.
+	 */
+	pthread__block_sigwinch();
 
 	while (1) {
 		static int done_help;

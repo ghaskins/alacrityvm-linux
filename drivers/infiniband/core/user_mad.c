@@ -458,8 +458,7 @@ static ssize_t ib_umad_write(struct file *filp, const char __user *buf,
 		goto err;
 	}
 
-	if (packet->mad.hdr.id < 0 ||
-	    packet->mad.hdr.id >= IB_UMAD_MAX_AGENTS) {
+	if (packet->mad.hdr.id >= IB_UMAD_MAX_AGENTS) {
 		ret = -EINVAL;
 		goto err;
 	}
@@ -703,7 +702,7 @@ static int ib_umad_unreg_agent(struct ib_umad_file *file, u32 __user *arg)
 	mutex_lock(&file->port->file_mutex);
 	mutex_lock(&file->mutex);
 
-	if (id < 0 || id >= IB_UMAD_MAX_AGENTS || !__get_agent(file, id)) {
+	if (id >= IB_UMAD_MAX_AGENTS || !__get_agent(file, id)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -781,7 +780,7 @@ static int ib_umad_open(struct inode *inode, struct file *filp)
 {
 	struct ib_umad_port *port;
 	struct ib_umad_file *file;
-	int ret = 0;
+	int ret;
 
 	port = container_of(inode->i_cdev, struct ib_umad_port, cdev);
 	if (port)
@@ -813,6 +812,8 @@ static int ib_umad_open(struct inode *inode, struct file *filp)
 	filp->private_data = file;
 
 	list_add_tail(&file->port_list, &port->file_list);
+
+	ret = nonseekable_open(inode, filp);
 
 out:
 	mutex_unlock(&port->file_mutex);
@@ -866,7 +867,8 @@ static const struct file_operations umad_fops = {
 	.compat_ioctl	= ib_umad_compat_ioctl,
 #endif
 	.open		= ib_umad_open,
-	.release	= ib_umad_close
+	.release	= ib_umad_close,
+	.llseek		= no_llseek,
 };
 
 static int ib_umad_sm_open(struct inode *inode, struct file *filp)
@@ -903,7 +905,7 @@ static int ib_umad_sm_open(struct inode *inode, struct file *filp)
 
 	filp->private_data = port;
 
-	return 0;
+	return nonseekable_open(inode, filp);
 
 fail:
 	kref_put(&port->umad_dev->ref, ib_umad_release_dev);
@@ -933,7 +935,8 @@ static int ib_umad_sm_close(struct inode *inode, struct file *filp)
 static const struct file_operations umad_sm_fops = {
 	.owner	 = THIS_MODULE,
 	.open	 = ib_umad_sm_open,
-	.release = ib_umad_sm_close
+	.release = ib_umad_sm_close,
+	.llseek	 = no_llseek,
 };
 
 static struct ib_client umad_client = {
@@ -1018,7 +1021,7 @@ static int ib_umad_init_port(struct ib_device *device, int port_num,
 
 	port->ib_dev   = device;
 	port->port_num = port_num;
-	init_MUTEX(&port->sm_sem);
+	sema_init(&port->sm_sem, 1);
 	mutex_init(&port->file_mutex);
 	INIT_LIST_HEAD(&port->file_list);
 
@@ -1081,7 +1084,6 @@ err_cdev:
 static void ib_umad_kill_port(struct ib_umad_port *port)
 {
 	struct ib_umad_file *file;
-	int already_dead;
 	int id;
 
 	dev_set_drvdata(port->dev,    NULL);
@@ -1099,7 +1101,6 @@ static void ib_umad_kill_port(struct ib_umad_port *port)
 
 	list_for_each_entry(file, &port->file_list, port_list) {
 		mutex_lock(&file->mutex);
-		already_dead = file->agents_dead;
 		file->agents_dead = 1;
 		mutex_unlock(&file->mutex);
 
@@ -1174,6 +1175,11 @@ static void ib_umad_remove_one(struct ib_device *device)
 	kref_put(&umad_dev->ref, ib_umad_release_dev);
 }
 
+static char *umad_devnode(struct device *dev, mode_t *mode)
+{
+	return kasprintf(GFP_KERNEL, "infiniband/%s", dev_name(dev));
+}
+
 static int __init ib_umad_init(void)
 {
 	int ret;
@@ -1191,6 +1197,8 @@ static int __init ib_umad_init(void)
 		printk(KERN_ERR "user_mad: couldn't create class infiniband_mad\n");
 		goto out_chrdev;
 	}
+
+	umad_class->devnode = umad_devnode;
 
 	ret = class_create_file(umad_class, &class_attr_abi_version.attr);
 	if (ret) {

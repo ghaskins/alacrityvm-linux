@@ -109,10 +109,11 @@
 #include <linux/spinlock.h>
 #include <linux/io.h>
 #include <linux/uaccess.h>
-#include <linux/smp_lock.h>
+#include <linux/mutex.h>
 
 #include <asm/system.h>
 
+static DEFINE_MUTEX(nvram_mutex);
 static DEFINE_SPINLOCK(nvram_state_lock);
 static int nvram_open_cnt;	/* #times opened */
 static int nvram_open_mode;	/* special open modes */
@@ -223,6 +224,8 @@ static loff_t nvram_llseek(struct file *file, loff_t offset, int origin)
 	case 2:
 		offset += NVRAM_BYTES;
 		break;
+	default:
+		return -EINVAL;
 	}
 
 	return (offset >= 0) ? (file->f_pos = offset) : -EINVAL;
@@ -296,8 +299,8 @@ checksum_err:
 	return -EIO;
 }
 
-static int nvram_ioctl(struct inode *inode, struct file *file,
-					unsigned int cmd, unsigned long arg)
+static long nvram_ioctl(struct file *file, unsigned int cmd,
+			unsigned long arg)
 {
 	int i;
 
@@ -308,6 +311,7 @@ static int nvram_ioctl(struct inode *inode, struct file *file,
 		if (!capable(CAP_SYS_ADMIN))
 			return -EACCES;
 
+		mutex_lock(&nvram_mutex);
 		spin_lock_irq(&rtc_lock);
 
 		for (i = 0; i < NVRAM_BYTES; ++i)
@@ -315,6 +319,7 @@ static int nvram_ioctl(struct inode *inode, struct file *file,
 		__nvram_set_checksum();
 
 		spin_unlock_irq(&rtc_lock);
+		mutex_unlock(&nvram_mutex);
 		return 0;
 
 	case NVRAM_SETCKS:
@@ -323,9 +328,11 @@ static int nvram_ioctl(struct inode *inode, struct file *file,
 		if (!capable(CAP_SYS_ADMIN))
 			return -EACCES;
 
+		mutex_lock(&nvram_mutex);
 		spin_lock_irq(&rtc_lock);
 		__nvram_set_checksum();
 		spin_unlock_irq(&rtc_lock);
+		mutex_unlock(&nvram_mutex);
 		return 0;
 
 	default:
@@ -422,7 +429,7 @@ static const struct file_operations nvram_fops = {
 	.llseek		= nvram_llseek,
 	.read		= nvram_read,
 	.write		= nvram_write,
-	.ioctl		= nvram_ioctl,
+	.unlocked_ioctl	= nvram_ioctl,
 	.open		= nvram_open,
 	.release	= nvram_release,
 };

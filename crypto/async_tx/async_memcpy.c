@@ -25,6 +25,7 @@
  */
 #include <linux/kernel.h>
 #include <linux/highmem.h>
+#include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/dma-mapping.h>
 #include <linux/async_tx.h>
@@ -83,8 +84,8 @@ async_memcpy(struct page *dest, struct page *src, unsigned int dest_offset,
 
 		memcpy(dest_buf, src_buf, len);
 
-		kunmap_atomic(dest_buf, KM_USER0);
 		kunmap_atomic(src_buf, KM_USER1);
+		kunmap_atomic(dest_buf, KM_USER0);
 
 		async_tx_sync_epilog(submit);
 	}

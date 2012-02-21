@@ -992,7 +992,7 @@ static int aoa_fabric_layout_probe(struct soundbus_dev *sdev)
 		return -ENODEV;
 
 	/* by breaking out we keep a reference */
-	while ((sound = of_get_next_child(sdev->ofdev.node, sound))) {
+	while ((sound = of_get_next_child(sdev->ofdev.dev.of_node, sound))) {
 		if (sound->type && strcasecmp(sound->type, "soundchip") == 0)
 			break;
 	}
@@ -1073,10 +1073,10 @@ static int aoa_fabric_layout_probe(struct soundbus_dev *sdev)
 	sdev->pcmid = -1;
 	list_del(&ldev->list);
 	layouts_list_items--;
+	kfree(ldev);
  outnodev:
  	of_node_put(sound);
  	layout_device = NULL;
- 	kfree(ldev);
 	return -ENODEV;
 }
 

@@ -1,7 +1,7 @@
 /*
  * A RTC driver for the Simtek STK17TA8
  *
- * By Thomas Hommel <thomas.hommel@gefanuc.com>
+ * By Thomas Hommel <thomas.hommel@ge.com>
  *
  * Based on the DS1553 driver from
  * Atsushi Nemoto <anemo@mba.ocn.ne.jp>
@@ -21,6 +21,7 @@
 #include <linux/rtc.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
+#include <linux/module.h>
 
 #define DRV_VERSION "0.1"
 
@@ -244,7 +245,7 @@ static const struct rtc_class_ops stk17ta8_rtc_ops = {
 	.alarm_irq_enable	= stk17ta8_rtc_alarm_irq_enable,
 };
 
-static ssize_t stk17ta8_nvram_read(struct kobject *kobj,
+static ssize_t stk17ta8_nvram_read(struct file *filp, struct kobject *kobj,
 				 struct bin_attribute *attr, char *buf,
 				 loff_t pos, size_t size)
 {
@@ -259,7 +260,7 @@ static ssize_t stk17ta8_nvram_read(struct kobject *kobj,
 	return count;
 }
 
-static ssize_t stk17ta8_nvram_write(struct kobject *kobj,
+static ssize_t stk17ta8_nvram_write(struct file *filp, struct kobject *kobj,
 				  struct bin_attribute *attr, char *buf,
 				  loff_t pos, size_t size)
 {
@@ -382,7 +383,7 @@ static __exit void stk17ta8_exit(void)
 module_init(stk17ta8_init);
 module_exit(stk17ta8_exit);
 
-MODULE_AUTHOR("Thomas Hommel <thomas.hommel@gefanuc.com>");
+MODULE_AUTHOR("Thomas Hommel <thomas.hommel@ge.com>");
 MODULE_DESCRIPTION("Simtek STK17TA8 RTC driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(DRV_VERSION);

@@ -207,7 +207,7 @@ struct kaweth_ethernet_configuration
 	__le16 segment_size;
 	__u16 max_multicast_filters;
 	__u8 reserved3;
-} __attribute__ ((packed));
+} __packed;
 
 /****************************************************************
  *     kaweth_device
@@ -406,6 +406,7 @@ static int kaweth_download_firmware(struct kaweth_device *kaweth,
 
 	if (fw->size > KAWETH_FIRMWARE_BUF_SIZE) {
 		err("Firmware too big: %zu", fw->size);
+		release_firmware(fw);
 		return -ENOSPC;
 	}
 	data_len = fw->size;
@@ -759,14 +760,6 @@ static int kaweth_close(struct net_device *net)
 	return 0;
 }
 
-static void kaweth_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
-{
-	struct kaweth_device *kaweth = netdev_priv(dev);
-
-	strlcpy(info->driver, driver_name, sizeof(info->driver));
-	usb_make_path(kaweth->dev, info->bus_info, sizeof (info->bus_info));
-}
-
 static u32 kaweth_get_link(struct net_device *dev)
 {
 	struct kaweth_device *kaweth = netdev_priv(dev);
@@ -775,7 +768,6 @@ static u32 kaweth_get_link(struct net_device *dev)
 }
 
 static const struct ethtool_ops ops = {
-	.get_drvinfo	= kaweth_get_drvinfo,
 	.get_link	= kaweth_get_link
 };
 
@@ -856,7 +848,6 @@ skip:
 	{
 		kaweth->stats.tx_packets++;
 		kaweth->stats.tx_bytes += skb->len;
-		net->trans_start = jiffies;
 	}
 
 	spin_unlock_irq(&kaweth->device_lock);
@@ -994,7 +985,7 @@ static const struct net_device_ops kaweth_netdev_ops = {
 	.ndo_stop =			kaweth_close,
 	.ndo_start_xmit =		kaweth_start_xmit,
 	.ndo_tx_timeout =		kaweth_tx_timeout,
-	.ndo_set_multicast_list =	kaweth_set_rx_mode,
+	.ndo_set_rx_mode =		kaweth_set_rx_mode,
 	.ndo_get_stats =		kaweth_netdev_stats,
 	.ndo_change_mtu =		eth_change_mtu,
 	.ndo_set_mac_address =		eth_mac_addr,
@@ -1156,13 +1147,13 @@ err_fw:
 	if (!kaweth->irq_urb)
 		goto err_tx_and_rx;
 
-	kaweth->intbuffer = usb_buffer_alloc(	kaweth->dev,
+	kaweth->intbuffer = usb_alloc_coherent(	kaweth->dev,
 						INTBUFFERSIZE,
 						GFP_KERNEL,
 						&kaweth->intbufferhandle);
 	if (!kaweth->intbuffer)
 		goto err_tx_and_rx_and_irq;
-	kaweth->rx_buf = usb_buffer_alloc(	kaweth->dev,
+	kaweth->rx_buf = usb_alloc_coherent(	kaweth->dev,
 						KAWETH_BUF_SIZE,
 						GFP_KERNEL,
 						&kaweth->rxbufferhandle);
@@ -1203,9 +1194,9 @@ err_fw:
 
 err_intfdata:
 	usb_set_intfdata(intf, NULL);
-	usb_buffer_free(kaweth->dev, KAWETH_BUF_SIZE, (void *)kaweth->rx_buf, kaweth->rxbufferhandle);
+	usb_free_coherent(kaweth->dev, KAWETH_BUF_SIZE, (void *)kaweth->rx_buf, kaweth->rxbufferhandle);
 err_all_but_rxbuf:
-	usb_buffer_free(kaweth->dev, INTBUFFERSIZE, (void *)kaweth->intbuffer, kaweth->intbufferhandle);
+	usb_free_coherent(kaweth->dev, INTBUFFERSIZE, (void *)kaweth->intbuffer, kaweth->intbufferhandle);
 err_tx_and_rx_and_irq:
 	usb_free_urb(kaweth->irq_urb);
 err_tx_and_rx:
@@ -1230,7 +1221,7 @@ static void kaweth_disconnect(struct usb_interface *intf)
 
 	usb_set_intfdata(intf, NULL);
 	if (!kaweth) {
-		dev_warn(&intf->dev, "unregistering non-existant device\n");
+		dev_warn(&intf->dev, "unregistering non-existent device\n");
 		return;
 	}
 	netdev = kaweth->net;
@@ -1242,8 +1233,8 @@ static void kaweth_disconnect(struct usb_interface *intf)
 	usb_free_urb(kaweth->tx_urb);
 	usb_free_urb(kaweth->irq_urb);
 
-	usb_buffer_free(kaweth->dev, KAWETH_BUF_SIZE, (void *)kaweth->rx_buf, kaweth->rxbufferhandle);
-	usb_buffer_free(kaweth->dev, INTBUFFERSIZE, (void *)kaweth->intbuffer, kaweth->intbufferhandle);
+	usb_free_coherent(kaweth->dev, KAWETH_BUF_SIZE, (void *)kaweth->rx_buf, kaweth->rxbufferhandle);
+	usb_free_coherent(kaweth->dev, INTBUFFERSIZE, (void *)kaweth->intbuffer, kaweth->intbufferhandle);
 
 	free_netdev(netdev);
 }

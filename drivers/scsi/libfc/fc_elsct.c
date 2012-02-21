@@ -21,6 +21,7 @@
  * Provide interface to send ELS/CT FC frames
  */
 
+#include <linux/export.h>
 #include <asm/unaligned.h>
 #include <scsi/fc/fc_gs.h>
 #include <scsi/fc/fc_ns.h>
@@ -63,8 +64,8 @@ struct fc_seq *fc_elsct_send(struct fc_lport *lport, u32 did,
 		return NULL;
 	}
 
-	fc_fill_fc_hdr(fp, r_ctl, did, fc_host_port_id(lport->host), fh_type,
-		       FC_FC_FIRST_SEQ | FC_FC_END_SEQ | FC_FC_SEQ_INIT, 0);
+	fc_fill_fc_hdr(fp, r_ctl, did, lport->port_id, fh_type,
+		       FC_FCTL_REQ, 0);
 
 	return lport->tt.exch_seq_send(lport, fp, resp, NULL, arg, timer_msec);
 }

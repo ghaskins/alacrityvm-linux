@@ -12,6 +12,8 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/io.h>
+#include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
@@ -258,7 +260,7 @@ static int sh_sir_set_baudrate(struct sh_sir_self *self, u32 baudrate)
 
 	/* Baud Rate Error Correction x 10000 */
 	u32 rate_err_array[] = {
-		0000, 0625, 1250, 1875,
+		   0,  625, 1250, 1875,
 		2500, 3125, 3750, 4375,
 		5000, 5625, 6250, 6875,
 		7500, 8125, 8750, 9375,
@@ -511,7 +513,7 @@ static void sh_sir_tx(struct sh_sir_self *self, int phase)
 
 static int sh_sir_read_data(struct sh_sir_self *self)
 {
-	u16 val;
+	u16 val = 0;
 	int timeout = 1024;
 
 	while (timeout--) {
@@ -646,8 +648,10 @@ static int sh_sir_open(struct net_device *ndev)
 	sh_sir_set_baudrate(self, 9600);
 
 	self->irlap = irlap_open(ndev, &self->qos, DRIVER_NAME);
-	if (!self->irlap)
+	if (!self->irlap) {
+		err = -ENODEV;
 		goto open_err;
+	}
 
 	/*
 	 * Now enable the interrupt then start the queue
@@ -707,8 +711,7 @@ static int __devinit sh_sir_probe(struct platform_device *pdev)
 	struct sh_sir_self *self;
 	struct resource *res;
 	char clk_name[8];
-	void __iomem *base;
-	unsigned int irq;
+	int irq;
 	int err = -ENOMEM;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -722,14 +725,14 @@ static int __devinit sh_sir_probe(struct platform_device *pdev)
 	if (!ndev)
 		goto exit;
 
-	base = ioremap_nocache(res->start, resource_size(res));
-	if (!base) {
+	self = netdev_priv(ndev);
+	self->membase = ioremap_nocache(res->start, resource_size(res));
+	if (!self->membase) {
 		err = -ENXIO;
 		dev_err(&pdev->dev, "Unable to ioremap.\n");
 		goto err_mem_1;
 	}
 
-	self = netdev_priv(ndev);
 	err = sh_sir_init_iobuf(self, IRDA_SKB_MAX_MTU, IRDA_SIR_MAX_FRAME);
 	if (err)
 		goto err_mem_2;
@@ -746,7 +749,6 @@ static int __devinit sh_sir_probe(struct platform_device *pdev)
 	ndev->netdev_ops	= &sh_sir_ndo;
 	ndev->irq		= irq;
 
-	self->membase			= base;
 	self->ndev			= ndev;
 	self->qos.baud_rate.bits	&= IR_9600; /* FIXME */
 	self->qos.min_turn_time.bits	= 1; /* 10 ms or more */

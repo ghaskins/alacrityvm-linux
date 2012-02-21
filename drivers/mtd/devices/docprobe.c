@@ -49,12 +49,6 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/doc2000.h>
-#include <linux/mtd/compatmac.h>
-
-/* Where to look for the devices? */
-#ifndef CONFIG_MTD_DOCPROBE_ADDRESS
-#define CONFIG_MTD_DOCPROBE_ADDRESS 0
-#endif
 
 
 static unsigned long doc_config_location = CONFIG_MTD_DOCPROBE_ADDRESS;

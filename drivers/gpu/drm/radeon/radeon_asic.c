@@ -94,7 +94,7 @@ static void radeon_register_accessor_init(struct radeon_device *rdev)
 		rdev->mc_rreg = &rs600_mc_rreg;
 		rdev->mc_wreg = &rs600_mc_wreg;
 	}
-	if ((rdev->family >= CHIP_R600) && (rdev->family <= CHIP_RV740)) {
+	if (rdev->family >= CHIP_R600) {
 		rdev->pciep_rreg = &r600_pciep_rreg;
 		rdev->pciep_wreg = &r600_pciep_wreg;
 	}
@@ -134,7 +134,8 @@ static struct radeon_asic r100_asic = {
 	.suspend = &r100_suspend,
 	.resume = &r100_resume,
 	.vga_set_state = &r100_vga_set_state,
-	.gpu_reset = &r100_gpu_reset,
+	.gpu_is_lockup = &r100_gpu_is_lockup,
+	.asic_reset = &r100_asic_reset,
 	.gart_tlb_flush = &r100_pci_gart_tlb_flush,
 	.gart_set_page = &r100_pci_gart_set_page,
 	.cp_commit = &r100_cp_commit,
@@ -164,6 +165,15 @@ static struct radeon_asic r100_asic = {
 	.hpd_sense = &r100_hpd_sense,
 	.hpd_set_polarity = &r100_hpd_set_polarity,
 	.ioctl_wait_idle = NULL,
+	.gui_idle = &r100_gui_idle,
+	.pm_misc = &r100_pm_misc,
+	.pm_prepare = &r100_pm_prepare,
+	.pm_finish = &r100_pm_finish,
+	.pm_init_profile = &r100_pm_init_profile,
+	.pm_get_dynpm_state = &r100_pm_get_dynpm_state,
+	.pre_page_flip = &r100_pre_page_flip,
+	.page_flip = &r100_page_flip,
+	.post_page_flip = &r100_post_page_flip,
 };
 
 static struct radeon_asic r200_asic = {
@@ -172,7 +182,8 @@ static struct radeon_asic r200_asic = {
 	.suspend = &r100_suspend,
 	.resume = &r100_resume,
 	.vga_set_state = &r100_vga_set_state,
-	.gpu_reset = &r100_gpu_reset,
+	.gpu_is_lockup = &r100_gpu_is_lockup,
+	.asic_reset = &r100_asic_reset,
 	.gart_tlb_flush = &r100_pci_gart_tlb_flush,
 	.gart_set_page = &r100_pci_gart_set_page,
 	.cp_commit = &r100_cp_commit,
@@ -201,6 +212,15 @@ static struct radeon_asic r200_asic = {
 	.hpd_sense = &r100_hpd_sense,
 	.hpd_set_polarity = &r100_hpd_set_polarity,
 	.ioctl_wait_idle = NULL,
+	.gui_idle = &r100_gui_idle,
+	.pm_misc = &r100_pm_misc,
+	.pm_prepare = &r100_pm_prepare,
+	.pm_finish = &r100_pm_finish,
+	.pm_init_profile = &r100_pm_init_profile,
+	.pm_get_dynpm_state = &r100_pm_get_dynpm_state,
+	.pre_page_flip = &r100_pre_page_flip,
+	.page_flip = &r100_page_flip,
+	.post_page_flip = &r100_post_page_flip,
 };
 
 static struct radeon_asic r300_asic = {
@@ -209,7 +229,8 @@ static struct radeon_asic r300_asic = {
 	.suspend = &r300_suspend,
 	.resume = &r300_resume,
 	.vga_set_state = &r100_vga_set_state,
-	.gpu_reset = &r300_gpu_reset,
+	.gpu_is_lockup = &r300_gpu_is_lockup,
+	.asic_reset = &r300_asic_reset,
 	.gart_tlb_flush = &r100_pci_gart_tlb_flush,
 	.gart_set_page = &r100_pci_gart_set_page,
 	.cp_commit = &r100_cp_commit,
@@ -239,6 +260,15 @@ static struct radeon_asic r300_asic = {
 	.hpd_sense = &r100_hpd_sense,
 	.hpd_set_polarity = &r100_hpd_set_polarity,
 	.ioctl_wait_idle = NULL,
+	.gui_idle = &r100_gui_idle,
+	.pm_misc = &r100_pm_misc,
+	.pm_prepare = &r100_pm_prepare,
+	.pm_finish = &r100_pm_finish,
+	.pm_init_profile = &r100_pm_init_profile,
+	.pm_get_dynpm_state = &r100_pm_get_dynpm_state,
+	.pre_page_flip = &r100_pre_page_flip,
+	.page_flip = &r100_page_flip,
+	.post_page_flip = &r100_post_page_flip,
 };
 
 static struct radeon_asic r300_asic_pcie = {
@@ -247,7 +277,8 @@ static struct radeon_asic r300_asic_pcie = {
 	.suspend = &r300_suspend,
 	.resume = &r300_resume,
 	.vga_set_state = &r100_vga_set_state,
-	.gpu_reset = &r300_gpu_reset,
+	.gpu_is_lockup = &r300_gpu_is_lockup,
+	.asic_reset = &r300_asic_reset,
 	.gart_tlb_flush = &rv370_pcie_gart_tlb_flush,
 	.gart_set_page = &rv370_pcie_gart_set_page,
 	.cp_commit = &r100_cp_commit,
@@ -276,6 +307,15 @@ static struct radeon_asic r300_asic_pcie = {
 	.hpd_sense = &r100_hpd_sense,
 	.hpd_set_polarity = &r100_hpd_set_polarity,
 	.ioctl_wait_idle = NULL,
+	.gui_idle = &r100_gui_idle,
+	.pm_misc = &r100_pm_misc,
+	.pm_prepare = &r100_pm_prepare,
+	.pm_finish = &r100_pm_finish,
+	.pm_init_profile = &r100_pm_init_profile,
+	.pm_get_dynpm_state = &r100_pm_get_dynpm_state,
+	.pre_page_flip = &r100_pre_page_flip,
+	.page_flip = &r100_page_flip,
+	.post_page_flip = &r100_post_page_flip,
 };
 
 static struct radeon_asic r420_asic = {
@@ -284,7 +324,8 @@ static struct radeon_asic r420_asic = {
 	.suspend = &r420_suspend,
 	.resume = &r420_resume,
 	.vga_set_state = &r100_vga_set_state,
-	.gpu_reset = &r300_gpu_reset,
+	.gpu_is_lockup = &r300_gpu_is_lockup,
+	.asic_reset = &r300_asic_reset,
 	.gart_tlb_flush = &rv370_pcie_gart_tlb_flush,
 	.gart_set_page = &rv370_pcie_gart_set_page,
 	.cp_commit = &r100_cp_commit,
@@ -314,6 +355,15 @@ static struct radeon_asic r420_asic = {
 	.hpd_sense = &r100_hpd_sense,
 	.hpd_set_polarity = &r100_hpd_set_polarity,
 	.ioctl_wait_idle = NULL,
+	.gui_idle = &r100_gui_idle,
+	.pm_misc = &r100_pm_misc,
+	.pm_prepare = &r100_pm_prepare,
+	.pm_finish = &r100_pm_finish,
+	.pm_init_profile = &r420_pm_init_profile,
+	.pm_get_dynpm_state = &r100_pm_get_dynpm_state,
+	.pre_page_flip = &r100_pre_page_flip,
+	.page_flip = &r100_page_flip,
+	.post_page_flip = &r100_post_page_flip,
 };
 
 static struct radeon_asic rs400_asic = {
@@ -322,7 +372,8 @@ static struct radeon_asic rs400_asic = {
 	.suspend = &rs400_suspend,
 	.resume = &rs400_resume,
 	.vga_set_state = &r100_vga_set_state,
-	.gpu_reset = &r300_gpu_reset,
+	.gpu_is_lockup = &r300_gpu_is_lockup,
+	.asic_reset = &r300_asic_reset,
 	.gart_tlb_flush = &rs400_gart_tlb_flush,
 	.gart_set_page = &rs400_gart_set_page,
 	.cp_commit = &r100_cp_commit,
@@ -352,6 +403,15 @@ static struct radeon_asic rs400_asic = {
 	.hpd_sense = &r100_hpd_sense,
 	.hpd_set_polarity = &r100_hpd_set_polarity,
 	.ioctl_wait_idle = NULL,
+	.gui_idle = &r100_gui_idle,
+	.pm_misc = &r100_pm_misc,
+	.pm_prepare = &r100_pm_prepare,
+	.pm_finish = &r100_pm_finish,
+	.pm_init_profile = &r100_pm_init_profile,
+	.pm_get_dynpm_state = &r100_pm_get_dynpm_state,
+	.pre_page_flip = &r100_pre_page_flip,
+	.page_flip = &r100_page_flip,
+	.post_page_flip = &r100_post_page_flip,
 };
 
 static struct radeon_asic rs600_asic = {
@@ -360,7 +420,8 @@ static struct radeon_asic rs600_asic = {
 	.suspend = &rs600_suspend,
 	.resume = &rs600_resume,
 	.vga_set_state = &r100_vga_set_state,
-	.gpu_reset = &r300_gpu_reset,
+	.gpu_is_lockup = &r300_gpu_is_lockup,
+	.asic_reset = &rs600_asic_reset,
 	.gart_tlb_flush = &rs600_gart_tlb_flush,
 	.gart_set_page = &rs600_gart_set_page,
 	.cp_commit = &r100_cp_commit,
@@ -390,6 +451,15 @@ static struct radeon_asic rs600_asic = {
 	.hpd_sense = &rs600_hpd_sense,
 	.hpd_set_polarity = &rs600_hpd_set_polarity,
 	.ioctl_wait_idle = NULL,
+	.gui_idle = &r100_gui_idle,
+	.pm_misc = &rs600_pm_misc,
+	.pm_prepare = &rs600_pm_prepare,
+	.pm_finish = &rs600_pm_finish,
+	.pm_init_profile = &r420_pm_init_profile,
+	.pm_get_dynpm_state = &r100_pm_get_dynpm_state,
+	.pre_page_flip = &rs600_pre_page_flip,
+	.page_flip = &rs600_page_flip,
+	.post_page_flip = &rs600_post_page_flip,
 };
 
 static struct radeon_asic rs690_asic = {
@@ -398,7 +468,8 @@ static struct radeon_asic rs690_asic = {
 	.suspend = &rs690_suspend,
 	.resume = &rs690_resume,
 	.vga_set_state = &r100_vga_set_state,
-	.gpu_reset = &r300_gpu_reset,
+	.gpu_is_lockup = &r300_gpu_is_lockup,
+	.asic_reset = &rs600_asic_reset,
 	.gart_tlb_flush = &rs400_gart_tlb_flush,
 	.gart_set_page = &rs400_gart_set_page,
 	.cp_commit = &r100_cp_commit,
@@ -428,6 +499,15 @@ static struct radeon_asic rs690_asic = {
 	.hpd_sense = &rs600_hpd_sense,
 	.hpd_set_polarity = &rs600_hpd_set_polarity,
 	.ioctl_wait_idle = NULL,
+	.gui_idle = &r100_gui_idle,
+	.pm_misc = &rs600_pm_misc,
+	.pm_prepare = &rs600_pm_prepare,
+	.pm_finish = &rs600_pm_finish,
+	.pm_init_profile = &r420_pm_init_profile,
+	.pm_get_dynpm_state = &r100_pm_get_dynpm_state,
+	.pre_page_flip = &rs600_pre_page_flip,
+	.page_flip = &rs600_page_flip,
+	.post_page_flip = &rs600_post_page_flip,
 };
 
 static struct radeon_asic rv515_asic = {
@@ -436,7 +516,8 @@ static struct radeon_asic rv515_asic = {
 	.suspend = &rv515_suspend,
 	.resume = &rv515_resume,
 	.vga_set_state = &r100_vga_set_state,
-	.gpu_reset = &rv515_gpu_reset,
+	.gpu_is_lockup = &r300_gpu_is_lockup,
+	.asic_reset = &rs600_asic_reset,
 	.gart_tlb_flush = &rv370_pcie_gart_tlb_flush,
 	.gart_set_page = &rv370_pcie_gart_set_page,
 	.cp_commit = &r100_cp_commit,
@@ -466,6 +547,15 @@ static struct radeon_asic rv515_asic = {
 	.hpd_sense = &rs600_hpd_sense,
 	.hpd_set_polarity = &rs600_hpd_set_polarity,
 	.ioctl_wait_idle = NULL,
+	.gui_idle = &r100_gui_idle,
+	.pm_misc = &rs600_pm_misc,
+	.pm_prepare = &rs600_pm_prepare,
+	.pm_finish = &rs600_pm_finish,
+	.pm_init_profile = &r420_pm_init_profile,
+	.pm_get_dynpm_state = &r100_pm_get_dynpm_state,
+	.pre_page_flip = &rs600_pre_page_flip,
+	.page_flip = &rs600_page_flip,
+	.post_page_flip = &rs600_post_page_flip,
 };
 
 static struct radeon_asic r520_asic = {
@@ -474,7 +564,8 @@ static struct radeon_asic r520_asic = {
 	.suspend = &rv515_suspend,
 	.resume = &r520_resume,
 	.vga_set_state = &r100_vga_set_state,
-	.gpu_reset = &rv515_gpu_reset,
+	.gpu_is_lockup = &r300_gpu_is_lockup,
+	.asic_reset = &rs600_asic_reset,
 	.gart_tlb_flush = &rv370_pcie_gart_tlb_flush,
 	.gart_set_page = &rv370_pcie_gart_set_page,
 	.cp_commit = &r100_cp_commit,
@@ -504,6 +595,15 @@ static struct radeon_asic r520_asic = {
 	.hpd_sense = &rs600_hpd_sense,
 	.hpd_set_polarity = &rs600_hpd_set_polarity,
 	.ioctl_wait_idle = NULL,
+	.gui_idle = &r100_gui_idle,
+	.pm_misc = &rs600_pm_misc,
+	.pm_prepare = &rs600_pm_prepare,
+	.pm_finish = &rs600_pm_finish,
+	.pm_init_profile = &r420_pm_init_profile,
+	.pm_get_dynpm_state = &r100_pm_get_dynpm_state,
+	.pre_page_flip = &rs600_pre_page_flip,
+	.page_flip = &rs600_page_flip,
+	.post_page_flip = &rs600_post_page_flip,
 };
 
 static struct radeon_asic r600_asic = {
@@ -513,7 +613,8 @@ static struct radeon_asic r600_asic = {
 	.resume = &r600_resume,
 	.cp_commit = &r600_cp_commit,
 	.vga_set_state = &r600_vga_set_state,
-	.gpu_reset = &r600_gpu_reset,
+	.gpu_is_lockup = &r600_gpu_is_lockup,
+	.asic_reset = &r600_asic_reset,
 	.gart_tlb_flush = &r600_pcie_gart_tlb_flush,
 	.gart_set_page = &rs600_gart_set_page,
 	.ring_test = &r600_ring_test,
@@ -524,14 +625,14 @@ static struct radeon_asic r600_asic = {
 	.fence_ring_emit = &r600_fence_ring_emit,
 	.cs_parse = &r600_cs_parse,
 	.copy_blit = &r600_copy_blit,
-	.copy_dma = &r600_copy_blit,
+	.copy_dma = NULL,
 	.copy = &r600_copy_blit,
 	.get_engine_clock = &radeon_atom_get_engine_clock,
 	.set_engine_clock = &radeon_atom_set_engine_clock,
 	.get_memory_clock = &radeon_atom_get_memory_clock,
 	.set_memory_clock = &radeon_atom_set_memory_clock,
-	.get_pcie_lanes = &rv370_get_pcie_lanes,
-	.set_pcie_lanes = NULL,
+	.get_pcie_lanes = &r600_get_pcie_lanes,
+	.set_pcie_lanes = &r600_set_pcie_lanes,
 	.set_clock_gating = NULL,
 	.set_surface_reg = r600_set_surface_reg,
 	.clear_surface_reg = r600_clear_surface_reg,
@@ -541,6 +642,15 @@ static struct radeon_asic r600_asic = {
 	.hpd_sense = &r600_hpd_sense,
 	.hpd_set_polarity = &r600_hpd_set_polarity,
 	.ioctl_wait_idle = r600_ioctl_wait_idle,
+	.gui_idle = &r600_gui_idle,
+	.pm_misc = &r600_pm_misc,
+	.pm_prepare = &rs600_pm_prepare,
+	.pm_finish = &rs600_pm_finish,
+	.pm_init_profile = &r600_pm_init_profile,
+	.pm_get_dynpm_state = &r600_pm_get_dynpm_state,
+	.pre_page_flip = &rs600_pre_page_flip,
+	.page_flip = &rs600_page_flip,
+	.post_page_flip = &rs600_post_page_flip,
 };
 
 static struct radeon_asic rs780_asic = {
@@ -549,8 +659,9 @@ static struct radeon_asic rs780_asic = {
 	.suspend = &r600_suspend,
 	.resume = &r600_resume,
 	.cp_commit = &r600_cp_commit,
+	.gpu_is_lockup = &r600_gpu_is_lockup,
 	.vga_set_state = &r600_vga_set_state,
-	.gpu_reset = &r600_gpu_reset,
+	.asic_reset = &r600_asic_reset,
 	.gart_tlb_flush = &r600_pcie_gart_tlb_flush,
 	.gart_set_page = &rs600_gart_set_page,
 	.ring_test = &r600_ring_test,
@@ -561,7 +672,7 @@ static struct radeon_asic rs780_asic = {
 	.fence_ring_emit = &r600_fence_ring_emit,
 	.cs_parse = &r600_cs_parse,
 	.copy_blit = &r600_copy_blit,
-	.copy_dma = &r600_copy_blit,
+	.copy_dma = NULL,
 	.copy = &r600_copy_blit,
 	.get_engine_clock = &radeon_atom_get_engine_clock,
 	.set_engine_clock = &radeon_atom_set_engine_clock,
@@ -578,6 +689,15 @@ static struct radeon_asic rs780_asic = {
 	.hpd_sense = &r600_hpd_sense,
 	.hpd_set_polarity = &r600_hpd_set_polarity,
 	.ioctl_wait_idle = r600_ioctl_wait_idle,
+	.gui_idle = &r600_gui_idle,
+	.pm_misc = &r600_pm_misc,
+	.pm_prepare = &rs600_pm_prepare,
+	.pm_finish = &rs600_pm_finish,
+	.pm_init_profile = &rs780_pm_init_profile,
+	.pm_get_dynpm_state = &r600_pm_get_dynpm_state,
+	.pre_page_flip = &rs600_pre_page_flip,
+	.page_flip = &rs600_page_flip,
+	.post_page_flip = &rs600_post_page_flip,
 };
 
 static struct radeon_asic rv770_asic = {
@@ -586,7 +706,8 @@ static struct radeon_asic rv770_asic = {
 	.suspend = &rv770_suspend,
 	.resume = &rv770_resume,
 	.cp_commit = &r600_cp_commit,
-	.gpu_reset = &rv770_gpu_reset,
+	.asic_reset = &r600_asic_reset,
+	.gpu_is_lockup = &r600_gpu_is_lockup,
 	.vga_set_state = &r600_vga_set_state,
 	.gart_tlb_flush = &r600_pcie_gart_tlb_flush,
 	.gart_set_page = &rs600_gart_set_page,
@@ -598,14 +719,14 @@ static struct radeon_asic rv770_asic = {
 	.fence_ring_emit = &r600_fence_ring_emit,
 	.cs_parse = &r600_cs_parse,
 	.copy_blit = &r600_copy_blit,
-	.copy_dma = &r600_copy_blit,
+	.copy_dma = NULL,
 	.copy = &r600_copy_blit,
 	.get_engine_clock = &radeon_atom_get_engine_clock,
 	.set_engine_clock = &radeon_atom_set_engine_clock,
 	.get_memory_clock = &radeon_atom_get_memory_clock,
 	.set_memory_clock = &radeon_atom_set_memory_clock,
-	.get_pcie_lanes = &rv370_get_pcie_lanes,
-	.set_pcie_lanes = NULL,
+	.get_pcie_lanes = &r600_get_pcie_lanes,
+	.set_pcie_lanes = &r600_set_pcie_lanes,
 	.set_clock_gating = &radeon_atom_set_clock_gating,
 	.set_surface_reg = r600_set_surface_reg,
 	.clear_surface_reg = r600_clear_surface_reg,
@@ -615,6 +736,15 @@ static struct radeon_asic rv770_asic = {
 	.hpd_sense = &r600_hpd_sense,
 	.hpd_set_polarity = &r600_hpd_set_polarity,
 	.ioctl_wait_idle = r600_ioctl_wait_idle,
+	.gui_idle = &r600_gui_idle,
+	.pm_misc = &rv770_pm_misc,
+	.pm_prepare = &rs600_pm_prepare,
+	.pm_finish = &rs600_pm_finish,
+	.pm_init_profile = &r600_pm_init_profile,
+	.pm_get_dynpm_state = &r600_pm_get_dynpm_state,
+	.pre_page_flip = &rs600_pre_page_flip,
+	.page_flip = &rv770_page_flip,
+	.post_page_flip = &rs600_post_page_flip,
 };
 
 static struct radeon_asic evergreen_asic = {
@@ -622,25 +752,74 @@ static struct radeon_asic evergreen_asic = {
 	.fini = &evergreen_fini,
 	.suspend = &evergreen_suspend,
 	.resume = &evergreen_resume,
-	.cp_commit = NULL,
-	.gpu_reset = &evergreen_gpu_reset,
+	.cp_commit = &r600_cp_commit,
+	.gpu_is_lockup = &evergreen_gpu_is_lockup,
+	.asic_reset = &evergreen_asic_reset,
 	.vga_set_state = &r600_vga_set_state,
-	.gart_tlb_flush = &r600_pcie_gart_tlb_flush,
+	.gart_tlb_flush = &evergreen_pcie_gart_tlb_flush,
 	.gart_set_page = &rs600_gart_set_page,
-	.ring_test = NULL,
-	.ring_ib_execute = NULL,
-	.irq_set = NULL,
-	.irq_process = NULL,
-	.get_vblank_counter = NULL,
-	.fence_ring_emit = NULL,
-	.cs_parse = NULL,
-	.copy_blit = NULL,
+	.ring_test = &r600_ring_test,
+	.ring_ib_execute = &evergreen_ring_ib_execute,
+	.irq_set = &evergreen_irq_set,
+	.irq_process = &evergreen_irq_process,
+	.get_vblank_counter = &evergreen_get_vblank_counter,
+	.fence_ring_emit = &r600_fence_ring_emit,
+	.cs_parse = &evergreen_cs_parse,
+	.copy_blit = &r600_copy_blit,
 	.copy_dma = NULL,
-	.copy = NULL,
+	.copy = &r600_copy_blit,
 	.get_engine_clock = &radeon_atom_get_engine_clock,
 	.set_engine_clock = &radeon_atom_set_engine_clock,
 	.get_memory_clock = &radeon_atom_get_memory_clock,
 	.set_memory_clock = &radeon_atom_set_memory_clock,
+	.get_pcie_lanes = &r600_get_pcie_lanes,
+	.set_pcie_lanes = &r600_set_pcie_lanes,
+	.set_clock_gating = NULL,
+	.set_surface_reg = r600_set_surface_reg,
+	.clear_surface_reg = r600_clear_surface_reg,
+	.bandwidth_update = &evergreen_bandwidth_update,
+	.hpd_init = &evergreen_hpd_init,
+	.hpd_fini = &evergreen_hpd_fini,
+	.hpd_sense = &evergreen_hpd_sense,
+	.hpd_set_polarity = &evergreen_hpd_set_polarity,
+	.ioctl_wait_idle = r600_ioctl_wait_idle,
+	.gui_idle = &r600_gui_idle,
+	.pm_misc = &evergreen_pm_misc,
+	.pm_prepare = &evergreen_pm_prepare,
+	.pm_finish = &evergreen_pm_finish,
+	.pm_init_profile = &r600_pm_init_profile,
+	.pm_get_dynpm_state = &r600_pm_get_dynpm_state,
+	.pre_page_flip = &evergreen_pre_page_flip,
+	.page_flip = &evergreen_page_flip,
+	.post_page_flip = &evergreen_post_page_flip,
+};
+
+static struct radeon_asic sumo_asic = {
+	.init = &evergreen_init,
+	.fini = &evergreen_fini,
+	.suspend = &evergreen_suspend,
+	.resume = &evergreen_resume,
+	.cp_commit = &r600_cp_commit,
+	.gpu_is_lockup = &evergreen_gpu_is_lockup,
+	.asic_reset = &evergreen_asic_reset,
+	.vga_set_state = &r600_vga_set_state,
+	.gart_tlb_flush = &evergreen_pcie_gart_tlb_flush,
+	.gart_set_page = &rs600_gart_set_page,
+	.ring_test = &r600_ring_test,
+	.ring_ib_execute = &evergreen_ring_ib_execute,
+	.irq_set = &evergreen_irq_set,
+	.irq_process = &evergreen_irq_process,
+	.get_vblank_counter = &evergreen_get_vblank_counter,
+	.fence_ring_emit = &r600_fence_ring_emit,
+	.cs_parse = &evergreen_cs_parse,
+	.copy_blit = &r600_copy_blit,
+	.copy_dma = NULL,
+	.copy = &r600_copy_blit,
+	.get_engine_clock = &radeon_atom_get_engine_clock,
+	.set_engine_clock = &radeon_atom_set_engine_clock,
+	.get_memory_clock = NULL,
+	.set_memory_clock = NULL,
+	.get_pcie_lanes = NULL,
 	.set_pcie_lanes = NULL,
 	.set_clock_gating = NULL,
 	.set_surface_reg = r600_set_surface_reg,
@@ -650,11 +829,122 @@ static struct radeon_asic evergreen_asic = {
 	.hpd_fini = &evergreen_hpd_fini,
 	.hpd_sense = &evergreen_hpd_sense,
 	.hpd_set_polarity = &evergreen_hpd_set_polarity,
+	.ioctl_wait_idle = r600_ioctl_wait_idle,
+	.gui_idle = &r600_gui_idle,
+	.pm_misc = &evergreen_pm_misc,
+	.pm_prepare = &evergreen_pm_prepare,
+	.pm_finish = &evergreen_pm_finish,
+	.pm_init_profile = &sumo_pm_init_profile,
+	.pm_get_dynpm_state = &r600_pm_get_dynpm_state,
+	.pre_page_flip = &evergreen_pre_page_flip,
+	.page_flip = &evergreen_page_flip,
+	.post_page_flip = &evergreen_post_page_flip,
+};
+
+static struct radeon_asic btc_asic = {
+	.init = &evergreen_init,
+	.fini = &evergreen_fini,
+	.suspend = &evergreen_suspend,
+	.resume = &evergreen_resume,
+	.cp_commit = &r600_cp_commit,
+	.gpu_is_lockup = &evergreen_gpu_is_lockup,
+	.asic_reset = &evergreen_asic_reset,
+	.vga_set_state = &r600_vga_set_state,
+	.gart_tlb_flush = &evergreen_pcie_gart_tlb_flush,
+	.gart_set_page = &rs600_gart_set_page,
+	.ring_test = &r600_ring_test,
+	.ring_ib_execute = &evergreen_ring_ib_execute,
+	.irq_set = &evergreen_irq_set,
+	.irq_process = &evergreen_irq_process,
+	.get_vblank_counter = &evergreen_get_vblank_counter,
+	.fence_ring_emit = &r600_fence_ring_emit,
+	.cs_parse = &evergreen_cs_parse,
+	.copy_blit = &r600_copy_blit,
+	.copy_dma = NULL,
+	.copy = &r600_copy_blit,
+	.get_engine_clock = &radeon_atom_get_engine_clock,
+	.set_engine_clock = &radeon_atom_set_engine_clock,
+	.get_memory_clock = &radeon_atom_get_memory_clock,
+	.set_memory_clock = &radeon_atom_set_memory_clock,
+	.get_pcie_lanes = NULL,
+	.set_pcie_lanes = NULL,
+	.set_clock_gating = NULL,
+	.set_surface_reg = r600_set_surface_reg,
+	.clear_surface_reg = r600_clear_surface_reg,
+	.bandwidth_update = &evergreen_bandwidth_update,
+	.hpd_init = &evergreen_hpd_init,
+	.hpd_fini = &evergreen_hpd_fini,
+	.hpd_sense = &evergreen_hpd_sense,
+	.hpd_set_polarity = &evergreen_hpd_set_polarity,
+	.ioctl_wait_idle = r600_ioctl_wait_idle,
+	.gui_idle = &r600_gui_idle,
+	.pm_misc = &evergreen_pm_misc,
+	.pm_prepare = &evergreen_pm_prepare,
+	.pm_finish = &evergreen_pm_finish,
+	.pm_init_profile = &r600_pm_init_profile,
+	.pm_get_dynpm_state = &r600_pm_get_dynpm_state,
+	.pre_page_flip = &evergreen_pre_page_flip,
+	.page_flip = &evergreen_page_flip,
+	.post_page_flip = &evergreen_post_page_flip,
+};
+
+static struct radeon_asic cayman_asic = {
+	.init = &cayman_init,
+	.fini = &cayman_fini,
+	.suspend = &cayman_suspend,
+	.resume = &cayman_resume,
+	.cp_commit = &r600_cp_commit,
+	.gpu_is_lockup = &cayman_gpu_is_lockup,
+	.asic_reset = &cayman_asic_reset,
+	.vga_set_state = &r600_vga_set_state,
+	.gart_tlb_flush = &cayman_pcie_gart_tlb_flush,
+	.gart_set_page = &rs600_gart_set_page,
+	.ring_test = &r600_ring_test,
+	.ring_ib_execute = &evergreen_ring_ib_execute,
+	.irq_set = &evergreen_irq_set,
+	.irq_process = &evergreen_irq_process,
+	.get_vblank_counter = &evergreen_get_vblank_counter,
+	.fence_ring_emit = &r600_fence_ring_emit,
+	.cs_parse = &evergreen_cs_parse,
+	.copy_blit = &r600_copy_blit,
+	.copy_dma = NULL,
+	.copy = &r600_copy_blit,
+	.get_engine_clock = &radeon_atom_get_engine_clock,
+	.set_engine_clock = &radeon_atom_set_engine_clock,
+	.get_memory_clock = &radeon_atom_get_memory_clock,
+	.set_memory_clock = &radeon_atom_set_memory_clock,
+	.get_pcie_lanes = NULL,
+	.set_pcie_lanes = NULL,
+	.set_clock_gating = NULL,
+	.set_surface_reg = r600_set_surface_reg,
+	.clear_surface_reg = r600_clear_surface_reg,
+	.bandwidth_update = &evergreen_bandwidth_update,
+	.hpd_init = &evergreen_hpd_init,
+	.hpd_fini = &evergreen_hpd_fini,
+	.hpd_sense = &evergreen_hpd_sense,
+	.hpd_set_polarity = &evergreen_hpd_set_polarity,
+	.ioctl_wait_idle = r600_ioctl_wait_idle,
+	.gui_idle = &r600_gui_idle,
+	.pm_misc = &evergreen_pm_misc,
+	.pm_prepare = &evergreen_pm_prepare,
+	.pm_finish = &evergreen_pm_finish,
+	.pm_init_profile = &r600_pm_init_profile,
+	.pm_get_dynpm_state = &r600_pm_get_dynpm_state,
+	.pre_page_flip = &evergreen_pre_page_flip,
+	.page_flip = &evergreen_page_flip,
+	.post_page_flip = &evergreen_post_page_flip,
 };
 
 int radeon_asic_init(struct radeon_device *rdev)
 {
 	radeon_register_accessor_init(rdev);
+
+	/* set the number of crtcs */
+	if (rdev->flags & RADEON_SINGLE_CRTC)
+		rdev->num_crtc = 1;
+	else
+		rdev->num_crtc = 2;
+
 	switch (rdev->family) {
 	case CHIP_R100:
 	case CHIP_RV100:
@@ -682,6 +972,13 @@ int radeon_asic_init(struct radeon_device *rdev)
 	case CHIP_R423:
 	case CHIP_RV410:
 		rdev->asic = &r420_asic;
+		/* handle macs */
+		if (rdev->bios == NULL) {
+			rdev->asic->get_engine_clock = &radeon_legacy_get_engine_clock;
+			rdev->asic->set_engine_clock = &radeon_legacy_set_engine_clock;
+			rdev->asic->get_memory_clock = &radeon_legacy_get_memory_clock;
+			rdev->asic->set_memory_clock = NULL;
+		}
 		break;
 	case CHIP_RS400:
 	case CHIP_RS480:
@@ -727,7 +1024,32 @@ int radeon_asic_init(struct radeon_device *rdev)
 	case CHIP_JUNIPER:
 	case CHIP_CYPRESS:
 	case CHIP_HEMLOCK:
+		/* set num crtcs */
+		if (rdev->family == CHIP_CEDAR)
+			rdev->num_crtc = 4;
+		else
+			rdev->num_crtc = 6;
 		rdev->asic = &evergreen_asic;
+		break;
+	case CHIP_PALM:
+	case CHIP_SUMO:
+	case CHIP_SUMO2:
+		rdev->asic = &sumo_asic;
+		break;
+	case CHIP_BARTS:
+	case CHIP_TURKS:
+	case CHIP_CAICOS:
+		/* set num crtcs */
+		if (rdev->family == CHIP_CAICOS)
+			rdev->num_crtc = 4;
+		else
+			rdev->num_crtc = 6;
+		rdev->asic = &btc_asic;
+		break;
+	case CHIP_CAYMAN:
+		rdev->asic = &cayman_asic;
+		/* set num crtcs */
+		rdev->num_crtc = 6;
 		break;
 	default:
 		/* FIXME: not supported yet */
@@ -739,34 +1061,6 @@ int radeon_asic_init(struct radeon_device *rdev)
 		rdev->asic->set_memory_clock = NULL;
 	}
 
-	/* set the number of crtcs */
-	if (rdev->flags & RADEON_SINGLE_CRTC)
-		rdev->num_crtc = 1;
-	else {
-		if (ASIC_IS_DCE4(rdev))
-			rdev->num_crtc = 6;
-		else
-			rdev->num_crtc = 2;
-	}
-
 	return 0;
 }
 
-/*
- * Wrapper around modesetting bits. Move to radeon_clocks.c?
- */
-int radeon_clocks_init(struct radeon_device *rdev)
-{
-	int r;
-
-	r = radeon_static_clocks_init(rdev->ddev);
-	if (r) {
-		return r;
-	}
-	DRM_INFO("Clocks initialized !\n");
-	return 0;
-}
-
-void radeon_clocks_fini(struct radeon_device *rdev)
-{
-}

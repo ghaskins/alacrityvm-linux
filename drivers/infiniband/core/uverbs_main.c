@@ -72,6 +72,7 @@ DEFINE_IDR(ib_uverbs_ah_idr);
 DEFINE_IDR(ib_uverbs_cq_idr);
 DEFINE_IDR(ib_uverbs_qp_idr);
 DEFINE_IDR(ib_uverbs_srq_idr);
+DEFINE_IDR(ib_uverbs_xrcd_idr);
 
 static DEFINE_SPINLOCK(map_lock);
 static DECLARE_BITMAP(dev_map, IB_UVERBS_MAX_DEVICES);
@@ -107,6 +108,10 @@ static ssize_t (*uverbs_cmd_table[])(struct ib_uverbs_file *file,
 	[IB_USER_VERBS_CMD_MODIFY_SRQ]		= ib_uverbs_modify_srq,
 	[IB_USER_VERBS_CMD_QUERY_SRQ]		= ib_uverbs_query_srq,
 	[IB_USER_VERBS_CMD_DESTROY_SRQ]		= ib_uverbs_destroy_srq,
+	[IB_USER_VERBS_CMD_OPEN_XRCD]		= ib_uverbs_open_xrcd,
+	[IB_USER_VERBS_CMD_CLOSE_XRCD]		= ib_uverbs_close_xrcd,
+	[IB_USER_VERBS_CMD_CREATE_XSRQ]		= ib_uverbs_create_xsrq,
+	[IB_USER_VERBS_CMD_OPEN_QP]		= ib_uverbs_open_qp
 };
 
 static void ib_uverbs_add_one(struct ib_device *device);
@@ -202,8 +207,12 @@ static int ib_uverbs_cleanup_ucontext(struct ib_uverbs_file *file,
 			container_of(uobj, struct ib_uqp_object, uevent.uobject);
 
 		idr_remove_uobj(&ib_uverbs_qp_idr, uobj);
-		ib_uverbs_detach_umcast(qp, uqp);
-		ib_destroy_qp(qp);
+		if (qp != qp->real_qp) {
+			ib_close_qp(qp);
+		} else {
+			ib_uverbs_detach_umcast(qp, uqp);
+			ib_destroy_qp(qp);
+		}
 		ib_uverbs_release_uevent(file, &uqp->uevent);
 		kfree(uqp);
 	}
@@ -240,6 +249,18 @@ static int ib_uverbs_cleanup_ucontext(struct ib_uverbs_file *file,
 		ib_dereg_mr(mr);
 		kfree(uobj);
 	}
+
+	mutex_lock(&file->device->xrcd_tree_mutex);
+	list_for_each_entry_safe(uobj, tmp, &context->xrcd_list, list) {
+		struct ib_xrcd *xrcd = uobj->object;
+		struct ib_uxrcd_object *uxrcd =
+			container_of(uobj, struct ib_uxrcd_object, uobject);
+
+		idr_remove_uobj(&ib_uverbs_xrcd_idr, uobj);
+		ib_uverbs_dealloc_xrcd(file->device, xrcd);
+		kfree(uxrcd);
+	}
+	mutex_unlock(&file->device->xrcd_tree_mutex);
 
 	list_for_each_entry_safe(uobj, tmp, &context->pd_list, list) {
 		struct ib_pd *pd = uobj->object;
@@ -369,7 +390,8 @@ static const struct file_operations uverbs_event_fops = {
 	.read	 = ib_uverbs_event_read,
 	.poll    = ib_uverbs_event_poll,
 	.release = ib_uverbs_event_close,
-	.fasync  = ib_uverbs_event_fasync
+	.fasync  = ib_uverbs_event_fasync,
+	.llseek	 = no_llseek,
 };
 
 void ib_uverbs_comp_handler(struct ib_cq *cq, void *cq_context)
@@ -556,8 +578,7 @@ static ssize_t ib_uverbs_write(struct file *filp, const char __user *buf,
 	if (hdr.in_words * 4 != count)
 		return -EINVAL;
 
-	if (hdr.command < 0				||
-	    hdr.command >= ARRAY_SIZE(uverbs_cmd_table) ||
+	if (hdr.command >= ARRAY_SIZE(uverbs_cmd_table) ||
 	    !uverbs_cmd_table[hdr.command])
 		return -EINVAL;
 
@@ -623,7 +644,7 @@ static int ib_uverbs_open(struct inode *inode, struct file *filp)
 
 	filp->private_data = file;
 
-	return 0;
+	return nonseekable_open(inode, filp);
 
 err_module:
 	module_put(dev->ib_dev->owner);
@@ -651,7 +672,8 @@ static const struct file_operations uverbs_fops = {
 	.owner	 = THIS_MODULE,
 	.write	 = ib_uverbs_write,
 	.open	 = ib_uverbs_open,
-	.release = ib_uverbs_close
+	.release = ib_uverbs_close,
+	.llseek	 = no_llseek,
 };
 
 static const struct file_operations uverbs_mmap_fops = {
@@ -659,7 +681,8 @@ static const struct file_operations uverbs_mmap_fops = {
 	.write	 = ib_uverbs_write,
 	.mmap    = ib_uverbs_mmap,
 	.open	 = ib_uverbs_open,
-	.release = ib_uverbs_close
+	.release = ib_uverbs_close,
+	.llseek	 = no_llseek,
 };
 
 static struct ib_client uverbs_client = {
@@ -738,6 +761,8 @@ static void ib_uverbs_add_one(struct ib_device *device)
 
 	kref_init(&uverbs_dev->ref);
 	init_completion(&uverbs_dev->comp);
+	uverbs_dev->xrcd_tree = RB_ROOT;
+	mutex_init(&uverbs_dev->xrcd_tree_mutex);
 
 	spin_lock(&map_lock);
 	devnum = find_first_zero_bit(dev_map, IB_UVERBS_MAX_DEVICES);
@@ -821,6 +846,13 @@ static void ib_uverbs_remove_one(struct ib_device *device)
 	kfree(uverbs_dev);
 }
 
+static char *uverbs_devnode(struct device *dev, mode_t *mode)
+{
+	if (mode)
+		*mode = 0666;
+	return kasprintf(GFP_KERNEL, "infiniband/%s", dev_name(dev));
+}
+
 static int __init ib_uverbs_init(void)
 {
 	int ret;
@@ -838,6 +870,8 @@ static int __init ib_uverbs_init(void)
 		printk(KERN_ERR "user_verbs: couldn't create class infiniband_verbs\n");
 		goto out_chrdev;
 	}
+
+	uverbs_class->devnode = uverbs_devnode;
 
 	ret = class_create_file(uverbs_class, &class_attr_abi_version.attr);
 	if (ret) {

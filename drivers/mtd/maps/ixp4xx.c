@@ -107,8 +107,8 @@ static void ixp4xx_copy_from(struct map_info *map, void *to,
 		return;
 
 	if (from & 1) {
-		*dest++ = BYTE1(flash_read16(src));
-                src++;
+		*dest++ = BYTE1(flash_read16(src-1));
+		src++;
 		--len;
 	}
 
@@ -118,7 +118,7 @@ static void ixp4xx_copy_from(struct map_info *map, void *to,
 		*dest++ = BYTE1(data);
 		src += 2;
 		len -= 2;
-        }
+	}
 
 	if (len > 0)
 		*dest++ = BYTE0(flash_read16(src));
@@ -145,7 +145,6 @@ static void ixp4xx_write16(struct map_info *map, map_word d, unsigned long adr)
 struct ixp4xx_flash_info {
 	struct mtd_info *mtd;
 	struct map_info map;
-	struct mtd_partition *partitions;
 	struct resource *res;
 };
 
@@ -162,13 +161,11 @@ static int ixp4xx_flash_remove(struct platform_device *dev)
 		return 0;
 
 	if (info->mtd) {
-		del_mtd_partitions(info->mtd);
+		mtd_device_unregister(info->mtd);
 		map_destroy(info->mtd);
 	}
 	if (info->map.virt)
 		iounmap(info->map.virt);
-
-	kfree(info->partitions);
 
 	if (info->res) {
 		release_resource(info->res);
@@ -196,12 +193,11 @@ static int ixp4xx_flash_probe(struct platform_device *dev)
 			return err;
 	}
 
-	info = kmalloc(sizeof(struct ixp4xx_flash_info), GFP_KERNEL);
+	info = kzalloc(sizeof(struct ixp4xx_flash_info), GFP_KERNEL);
 	if(!info) {
 		err = -ENOMEM;
 		goto Error;
 	}
-	memset(info, 0, sizeof(struct ixp4xx_flash_info));
 
 	platform_set_drvdata(dev, info);
 
@@ -219,9 +215,9 @@ static int ixp4xx_flash_probe(struct platform_device *dev)
 	 */
 	info->map.bankwidth = 2;
 	info->map.name = dev_name(&dev->dev);
-	info->map.read = ixp4xx_read16,
-	info->map.write = ixp4xx_probe_write16,
-	info->map.copy_from = ixp4xx_copy_from,
+	info->map.read = ixp4xx_read16;
+	info->map.write = ixp4xx_probe_write16;
+	info->map.copy_from = ixp4xx_copy_from;
 
 	info->res = request_mem_region(dev->resource->start,
 			resource_size(dev->resource),
@@ -249,17 +245,14 @@ static int ixp4xx_flash_probe(struct platform_device *dev)
 	info->mtd->owner = THIS_MODULE;
 
 	/* Use the fast version */
-	info->map.write = ixp4xx_write16,
+	info->map.write = ixp4xx_write16;
 
-	err = parse_mtd_partitions(info->mtd, probes, &info->partitions, dev->resource->start);
-	if (err > 0) {
-		err = add_mtd_partitions(info->mtd, info->partitions, err);
-		if(err)
-			printk(KERN_ERR "Could not parse partitions\n");
-	}
-
-	if (err)
+	err = mtd_device_parse_register(info->mtd, probes, dev->resource->start,
+			plat->parts, plat->nr_parts);
+	if (err) {
+		printk(KERN_ERR "Could not parse partitions\n");
 		goto Error;
+	}
 
 	return 0;
 

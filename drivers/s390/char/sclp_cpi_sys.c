@@ -21,6 +21,7 @@
 #include <linux/err.h>
 #include <linux/slab.h>
 #include <linux/completion.h>
+#include <linux/export.h>
 #include <asm/ebcdic.h>
 #include <asm/sclp.h>
 
@@ -102,7 +103,7 @@ static struct sclp_req *cpi_prepare_req(void)
 	/* set system name */
 	set_data(evb->system_name, system_name);
 
-	/* set sytem level */
+	/* set system level */
 	evb->system_level = system_level;
 
 	/* set sysplex name */

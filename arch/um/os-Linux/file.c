@@ -13,9 +13,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
-#include "kern_constants.h"
 #include "os.h"
-#include "user.h"
 
 static void copy_stat(struct uml_stat *dst, const struct stat64 *src)
 {
@@ -560,4 +558,19 @@ int os_lock_file(int fd, int excl)
 	err = save;
  out:
 	return err;
+}
+
+unsigned os_major(unsigned long long dev)
+{
+	return major(dev);
+}
+
+unsigned os_minor(unsigned long long dev)
+{
+	return minor(dev);
+}
+
+unsigned long long os_makedev(unsigned major, unsigned minor)
+{
+	return makedev(major, minor);
 }

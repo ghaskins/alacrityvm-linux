@@ -1,4 +1,5 @@
 #include <linux/ioctl.h>
+#include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/poll.h>
@@ -6,7 +7,6 @@
 #include <linux/random.h>
 #include <linux/vbus.h>
 #include <linux/vbus_admin.h>
-#include <linux/slab.h>
 
 #include "vbus.h"
 

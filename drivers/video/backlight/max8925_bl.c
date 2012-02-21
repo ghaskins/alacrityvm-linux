@@ -17,6 +17,7 @@
 #include <linux/backlight.h>
 #include <linux/mfd/max8925.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 
 #define MAX_BRIGHTNESS		(0xff)
 #define MIN_BRIGHTNESS		(0)
@@ -92,7 +93,7 @@ static int max8925_backlight_get_brightness(struct backlight_device *bl)
 	return ret;
 }
 
-static struct backlight_ops max8925_backlight_ops = {
+static const struct backlight_ops max8925_backlight_ops = {
 	.options	= BL_CORE_SUSPENDRESUME,
 	.update_status	= max8925_backlight_update_status,
 	.get_brightness	= max8925_backlight_get_brightness,
@@ -136,6 +137,7 @@ static int __devinit max8925_backlight_probe(struct platform_device *pdev)
 	data->current_brightness = 0;
 
 	memset(&props, 0, sizeof(struct backlight_properties));
+	props.type = BACKLIGHT_RAW;
 	props.max_brightness = MAX_BRIGHTNESS;
 	bl = backlight_device_register(name, &pdev->dev, data,
 					&max8925_backlight_ops, &props);
@@ -162,6 +164,7 @@ static int __devinit max8925_backlight_probe(struct platform_device *pdev)
 	backlight_update_status(bl);
 	return 0;
 out:
+	backlight_device_unregister(bl);
 	kfree(data);
 	return ret;
 }

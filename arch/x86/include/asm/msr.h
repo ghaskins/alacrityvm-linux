@@ -148,8 +148,8 @@ static inline unsigned long long native_read_pmc(int counter)
 #define rdmsr(msr, val1, val2)					\
 do {								\
 	u64 __val = native_read_msr((msr));			\
-	(val1) = (u32)__val;					\
-	(val2) = (u32)(__val >> 32);				\
+	(void)((val1) = (u32)__val);				\
+	(void)((val2) = (u32)(__val >> 32));			\
 } while (0)
 
 static inline void wrmsr(unsigned msr, unsigned low, unsigned high)
@@ -169,7 +169,14 @@ static inline int wrmsr_safe(unsigned msr, unsigned low, unsigned high)
 	return native_write_msr_safe(msr, low, high);
 }
 
-/* rdmsr with exception handling */
+/*
+ * rdmsr with exception handling.
+ *
+ * Please note that the exception handling works only after we've
+ * switched to the "smart" #GP handler in trap_init() which knows about
+ * exception tables - using this macro earlier than that causes machine
+ * hangs on boxes which do not implement the @msr in the first argument.
+ */
 #define rdmsr_safe(msr, p1, p2)					\
 ({								\
 	int __err;						\

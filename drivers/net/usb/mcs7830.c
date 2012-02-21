@@ -1,5 +1,5 @@
 /*
- * MOSCHIP MCS7830 based USB 2.0 Ethernet Devices
+ * MOSCHIP MCS7830 based (7730/7830/7832) USB 2.0 Ethernet Devices
  *
  * based on usbnet.c, asix.c and the vendor provided mcs7830 driver
  *
@@ -10,6 +10,9 @@
  * Copyright (c) 2002-2003 TiVo Inc.
  *
  * Definitions gathered from MOSCHIP, Data Sheet_7830DA.pdf (thanks!).
+ *
+ * 2010-12-19: add 7832 USB PID ("functionality same as MCS7830"),
+ *             per active notification by manufacturer
  *
  * TODO:
  * - support HIF_REG_CONFIG_SLEEPMODE/HIF_REG_CONFIG_TXENABLE (via autopm?)
@@ -60,6 +63,7 @@
 #define MCS7830_MAX_MCAST	64
 
 #define MCS7830_VENDOR_ID	0x9710
+#define MCS7832_PRODUCT_ID	0x7832
 #define MCS7830_PRODUCT_ID	0x7830
 #define MCS7730_PRODUCT_ID	0x7730
 
@@ -142,11 +146,9 @@ static int mcs7830_set_reg(struct usbnet *dev, u16 index, u16 size, const void *
 	int ret;
 	void *buffer;
 
-	buffer = kmalloc(size, GFP_NOIO);
+	buffer = kmemdup(data, size, GFP_NOIO);
 	if (buffer == NULL)
 		return -ENOMEM;
-
-	memcpy(buffer, data, size);
 
 	ret = usb_control_msg(xdev, usb_sndctrlpipe(xdev, 0), MCS7830_WR_BREQ,
 			      MCS7830_WR_BMREQ, 0x0000, index, buffer,
@@ -353,7 +355,7 @@ static int mcs7830_set_autoneg(struct usbnet *dev, int ptrUserPhyMode)
 	if (!ret)
 		ret = mcs7830_write_phy(dev, MII_BMCR,
 				BMCR_ANENABLE | BMCR_ANRESTART	);
-	return ret < 0 ? : 0;
+	return ret;
 }
 
 
@@ -453,12 +455,12 @@ static void mcs7830_data_set_multicast(struct net_device *net)
 		 * for our 8 byte filter buffer
 		 * to avoid allocating memory that
 		 * is tricky to free later */
-		struct dev_mc_list *mc_list;
+		struct netdev_hw_addr *ha;
 		u32 crc_bits;
 
 		/* Build the multicast hash filter. */
-		netdev_for_each_mc_addr(mc_list, net) {
-			crc_bits = ether_crc(ETH_ALEN, mc_list->dmi_addr) >> 26;
+		netdev_for_each_mc_addr(ha, net) {
+			crc_bits = ether_crc(ETH_ALEN, ha->addr) >> 26;
 			data->multi_filter[crc_bits >> 3] |= 1 << (crc_bits & 7);
 		}
 	}
@@ -551,7 +553,7 @@ static const struct net_device_ops mcs7830_netdev_ops = {
 	.ndo_change_mtu		= usbnet_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_do_ioctl 		= mcs7830_ioctl,
-	.ndo_set_multicast_list = mcs7830_set_multicast,
+	.ndo_set_rx_mode	= mcs7830_set_multicast,
 	.ndo_set_mac_address	= mcs7830_set_mac_address,
 };
 
@@ -628,7 +630,7 @@ static int mcs7830_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 }
 
 static const struct driver_info moschip_info = {
-	.description	= "MOSCHIP 7830/7730 usb-NET adapter",
+	.description	= "MOSCHIP 7830/7832/7730 usb-NET adapter",
 	.bind		= mcs7830_bind,
 	.rx_fixup	= mcs7830_rx_fixup,
 	.flags		= FLAG_ETHER,
@@ -646,6 +648,10 @@ static const struct driver_info sitecom_info = {
 };
 
 static const struct usb_device_id products[] = {
+	{
+		USB_DEVICE(MCS7830_VENDOR_ID, MCS7832_PRODUCT_ID),
+		.driver_info = (unsigned long) &moschip_info,
+	},
 	{
 		USB_DEVICE(MCS7830_VENDOR_ID, MCS7830_PRODUCT_ID),
 		.driver_info = (unsigned long) &moschip_info,

@@ -7,6 +7,8 @@
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  */
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
@@ -215,7 +217,7 @@ static int get_config_reg(struct pinmux_info *gpioc, pinmux_enum_t enum_id,
 
 		if (!r_width)
 			break;
-		for (n = 0; n < (r_width / f_width) * 1 << f_width; n++) {
+		for (n = 0; n < (r_width / f_width) * (1 << f_width); n++) {
 			if (config_reg->enum_ids[n] == enum_id) {
 				*crp = config_reg;
 				*indexp = n;
@@ -559,10 +561,8 @@ static int sh_gpio_get_value(struct pinmux_info *gpioc, unsigned gpio)
 	struct pinmux_data_reg *dr = NULL;
 	int bit = 0;
 
-	if (!gpioc || get_data_reg(gpioc, gpio, &dr, &bit) != 0) {
-		BUG();
-		return 0;
-	}
+	if (!gpioc || get_data_reg(gpioc, gpio, &dr, &bit) != 0)
+		return -EINVAL;
 
 	return gpio_read_reg(dr->reg, dr->reg_width, 1, bit);
 }
@@ -577,11 +577,37 @@ static void sh_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 	sh_gpio_set_value(chip_to_pinmux(chip), offset, value);
 }
 
+static int sh_gpio_to_irq(struct gpio_chip *chip, unsigned offset)
+{
+	struct pinmux_info *gpioc = chip_to_pinmux(chip);
+	pinmux_enum_t enum_id;
+	pinmux_enum_t *enum_ids;
+	int i, k, pos;
+
+	pos = 0;
+	enum_id = 0;
+	while (1) {
+		pos = get_gpio_enum_id(gpioc, offset, pos, &enum_id);
+		if (pos <= 0 || !enum_id)
+			break;
+
+		for (i = 0; i < gpioc->gpio_irq_size; i++) {
+			enum_ids = gpioc->gpio_irq[i].enum_ids;
+			for (k = 0; enum_ids[k]; k++) {
+				if (enum_ids[k] == enum_id)
+					return gpioc->gpio_irq[i].irq;
+			}
+		}
+	}
+
+	return -ENOSYS;
+}
+
 int register_pinmux(struct pinmux_info *pip)
 {
 	struct gpio_chip *chip = &pip->chip;
 
-	pr_info("sh pinmux: %s handling gpio %d -> %d\n",
+	pr_info("%s handling gpio %d -> %d\n",
 		pip->name, pip->first_gpio, pip->last_gpio);
 
 	setup_data_regs(pip);
@@ -592,6 +618,7 @@ int register_pinmux(struct pinmux_info *pip)
 	chip->get = sh_gpio_get;
 	chip->direction_output = sh_gpio_direction_output;
 	chip->set = sh_gpio_set;
+	chip->to_irq = sh_gpio_to_irq;
 
 	WARN_ON(pip->first_gpio != 0); /* needs testing */
 
@@ -601,4 +628,11 @@ int register_pinmux(struct pinmux_info *pip)
 	chip->ngpio = (pip->last_gpio - pip->first_gpio) + 1;
 
 	return gpiochip_add(chip);
+}
+
+int unregister_pinmux(struct pinmux_info *pip)
+{
+	pr_info("%s deregistering\n", pip->name);
+
+	return gpiochip_remove(&pip->chip);
 }

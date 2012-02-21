@@ -27,6 +27,7 @@
 #include <linux/net.h>
 #include <linux/proc_fs.h>
 #include <linux/init.h>
+#include <linux/export.h>
 #include <net/arp.h>
 
 /*
@@ -70,7 +71,7 @@ static int fc_header(struct sk_buff *skb, struct net_device *dev,
 	if(daddr)
 	{
 		memcpy(fch->daddr,daddr,dev->addr_len);
-		return(hdr_len);
+		return hdr_len;
 	}
 	return -hdr_len;
 }

@@ -1,5 +1,6 @@
 /*
- * Copyright 2009 Novell.  All Rights Reserved.
+ * Copyright 2009 Novell, Gregory Haskins.  All Rights Reserved.
+ * Copyright 2012 Gregory Haskins <gregory.haskins@gmail.com>
  *
  * IOQ is a generic shared-memory, lockless queue mechanism. It can be used
  * in a variety of ways, though its intended purpose is to become the
@@ -20,7 +21,7 @@
  *    the basic structures and code.
  *
  * Author:
- *      Gregory Haskins <ghaskins@novell.com>
+ *      Gregory Haskins <gregory.haskins@gmail.com>
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License

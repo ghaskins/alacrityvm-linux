@@ -34,24 +34,20 @@
 #include <linux/io.h>
 #include <asm/div64.h>
 #include <linux/pci.h>
-#include <linux/pci_ids.h>
-#include <linux/smp_lock.h>
 #include <linux/timer.h>
-#include <linux/version.h>
 #include <linux/byteorder/generic.h>
 #include <linux/firmware.h>
 #include <linux/vmalloc.h>
 
 #include "ngene.h"
 
-#include "stv6110x.h"
-#include "stv090x.h"
-#include "lnbh24.h"
-
-static int one_adapter = 1;
+static int one_adapter;
 module_param(one_adapter, int, 0444);
 MODULE_PARM_DESC(one_adapter, "Use only one adapter.");
 
+static int shutdown_workaround;
+module_param(shutdown_workaround, int, 0644);
+MODULE_PARM_DESC(shutdown_workaround, "Activate workaround for shutdown problem with some chipsets.");
 
 static int debug;
 module_param(debug, int, 0444);
@@ -59,11 +55,7 @@ MODULE_PARM_DESC(debug, "Print debugging information.");
 
 DVB_DEFINE_MOD_OPT_ADAPTER_NR(adapter_nr);
 
-#define COMMAND_TIMEOUT_WORKAROUND
-
 #define dprintk	if (debug) printk
-
-#define DEVICE_NAME "ngene"
 
 #define ngwriteb(dat, adr)         writeb((dat), (char *)(dev->iomem + (adr)))
 #define ngwritel(dat, adr)         writel((dat), (char *)(dev->iomem + (adr)))
@@ -130,7 +122,7 @@ static void demux_tasklet(unsigned long data)
 						Cur->ngeneBuffer.SR.Flags &=
 							~0x40;
 						break;
-						/* Stop proccessing stream */
+						/* Stop processing stream */
 					}
 				} else {
 					/* We got a valid buffer,
@@ -141,7 +133,7 @@ static void demux_tasklet(unsigned long data)
 				printk(KERN_ERR DEVICE_NAME ": OOPS\n");
 				if (chan->HWState == HWSTATE_RUN) {
 					Cur->ngeneBuffer.SR.Flags &= ~0x40;
-					break;	/* Stop proccessing stream */
+					break;	/* Stop processing stream */
 				}
 			}
 			if (chan->AudioDTOUpdated) {
@@ -154,25 +146,25 @@ static void demux_tasklet(unsigned long data)
 			}
 		} else {
 			if (chan->HWState == HWSTATE_RUN) {
-				u32 Flags = 0;
+				u32 Flags = chan->DataFormatFlags;
+				IBufferExchange *exch1 = chan->pBufferExchange;
+				IBufferExchange *exch2 = chan->pBufferExchange2;
 				if (Cur->ngeneBuffer.SR.Flags & 0x01)
 					Flags |= BEF_EVEN_FIELD;
 				if (Cur->ngeneBuffer.SR.Flags & 0x20)
 					Flags |= BEF_OVERFLOW;
-				if (chan->pBufferExchange)
-					chan->pBufferExchange(chan,
-							      Cur->Buffer1,
-							      chan->
-							      Capture1Length,
-							      Cur->ngeneBuffer.
-							      SR.Clock, Flags);
-				if (chan->pBufferExchange2)
-					chan->pBufferExchange2(chan,
-							       Cur->Buffer2,
-							       chan->
-							       Capture2Length,
-							       Cur->ngeneBuffer.
-							       SR.Clock, Flags);
+				spin_unlock_irq(&chan->state_lock);
+				if (exch1)
+					exch1(chan, Cur->Buffer1,
+						chan->Capture1Length,
+						Cur->ngeneBuffer.SR.Clock,
+						Flags);
+				if (exch2)
+					exch2(chan, Cur->Buffer2,
+						chan->Capture2Length,
+						Cur->ngeneBuffer.SR.Clock,
+						Flags);
+				spin_lock_irq(&chan->state_lock);
 			} else if (chan->HWState != HWSTATE_STOP)
 				chan->HWState = HWSTATE_RUN;
 		}
@@ -352,7 +344,7 @@ static int ngene_command_mutex(struct ngene *dev, struct ngene_command *com)
 	return 0;
 }
 
-static int ngene_command(struct ngene *dev, struct ngene_command *com)
+int ngene_command(struct ngene *dev, struct ngene_command *com)
 {
 	int result;
 
@@ -362,55 +354,6 @@ static int ngene_command(struct ngene *dev, struct ngene_command *com)
 	return result;
 }
 
-
-static int ngene_command_i2c_read(struct ngene *dev, u8 adr,
-			   u8 *out, u8 outlen, u8 *in, u8 inlen, int flag)
-{
-	struct ngene_command com;
-
-	com.cmd.hdr.Opcode = CMD_I2C_READ;
-	com.cmd.hdr.Length = outlen + 3;
-	com.cmd.I2CRead.Device = adr << 1;
-	memcpy(com.cmd.I2CRead.Data, out, outlen);
-	com.cmd.I2CRead.Data[outlen] = inlen;
-	com.cmd.I2CRead.Data[outlen + 1] = 0;
-	com.in_len = outlen + 3;
-	com.out_len = inlen + 1;
-
-	if (ngene_command(dev, &com) < 0)
-		return -EIO;
-
-	if ((com.cmd.raw8[0] >> 1) != adr)
-		return -EIO;
-
-	if (flag)
-		memcpy(in, com.cmd.raw8, inlen + 1);
-	else
-		memcpy(in, com.cmd.raw8 + 1, inlen);
-	return 0;
-}
-
-static int ngene_command_i2c_write(struct ngene *dev, u8 adr,
-				   u8 *out, u8 outlen)
-{
-	struct ngene_command com;
-
-
-	com.cmd.hdr.Opcode = CMD_I2C_WRITE;
-	com.cmd.hdr.Length = outlen + 1;
-	com.cmd.I2CRead.Device = adr << 1;
-	memcpy(com.cmd.I2CRead.Data, out, outlen);
-	com.in_len = outlen + 1;
-	com.out_len = 1;
-
-	if (ngene_command(dev, &com) < 0)
-		return -EIO;
-
-	if (com.cmd.raw8[0] == 1)
-		return -EIO;
-
-	return 0;
-}
 
 static int ngene_command_load_firmware(struct ngene *dev,
 				       u8 *ngene_fw, u32 size)
@@ -477,7 +420,7 @@ static int ngene_command_config_free_buf(struct ngene *dev, u8 *config)
 	return 0;
 }
 
-static int ngene_command_gpio_set(struct ngene *dev, u8 select, u8 level)
+int ngene_command_gpio_set(struct ngene *dev, u8 select, u8 level)
 {
 	struct ngene_command com;
 
@@ -514,11 +457,12 @@ static int ngene_command_gpio_set(struct ngene *dev, u8 select, u8 level)
 
 /****************************************************************************/
 
-static u8 TSFeatureDecoderSetup[8 * 4] = {
+static u8 TSFeatureDecoderSetup[8 * 5] = {
 	0x42, 0x00, 0x00, 0x02, 0x02, 0xbc, 0x00, 0x00,
 	0x40, 0x06, 0x00, 0x02, 0x02, 0xbc, 0x00, 0x00,	/* DRXH */
 	0x71, 0x07, 0x00, 0x02, 0x02, 0xbc, 0x00, 0x00,	/* DRXHser */
-	0x72, 0x06, 0x00, 0x02, 0x02, 0xbc, 0x00, 0x00,	/* S2ser */
+	0x72, 0x00, 0x00, 0x02, 0x02, 0xbc, 0x00, 0x00,	/* S2ser */
+	0x40, 0x07, 0x00, 0x02, 0x02, 0xbc, 0x00, 0x00, /* LGDT3303 */
 };
 
 /* Set NGENE I2S Config to 16 bit packed */
@@ -533,9 +477,9 @@ static u8 SPDIFConfiguration[10] = {
 
 /* Set NGENE I2S Config to transport stream compatible mode */
 
-static u8 TS_I2SConfiguration[4] = { 0x3E, 0x1A, 0x00, 0x00 }; /*3e 18 00 00 ?*/
+static u8 TS_I2SConfiguration[4] = { 0x3E, 0x18, 0x00, 0x00 };
 
-static u8 TS_I2SOutConfiguration[4] = { 0x80, 0x20, 0x00, 0x00 };
+static u8 TS_I2SOutConfiguration[4] = { 0x80, 0x04, 0x00, 0x00 };
 
 static u8 ITUDecoderSetup[4][16] = {
 	{0x1c, 0x13, 0x01, 0x68, 0x3d, 0x90, 0x14, 0x20,  /* SDTV */
@@ -559,11 +503,11 @@ static u8 ITUFeatureDecoderSetup[8] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x78, 0x04, 0x00
 };
 
-static void FillTSBuffer(void *Buffer, int Length, u32 Flags)
+void FillTSBuffer(void *Buffer, int Length, u32 Flags)
 {
 	u32 *ptr = Buffer;
 
-	memset(Buffer, 0xff, Length);
+	memset(Buffer, TS_FILLER, Length);
 	while (Length > 0) {
 		if (Flags & DF_SWAP32)
 			*ptr = 0x471FFF10;
@@ -628,11 +572,7 @@ static int ngene_command_stream_control(struct ngene *dev, u8 stream,
 	u16 BsSPI = ((stream & 1) ? 0x9800 : 0x9700);
 	u16 BsSDO = 0x9B00;
 
-	/* down(&dev->stream_mutex); */
-	while (down_trylock(&dev->stream_mutex)) {
-		printk(KERN_INFO DEVICE_NAME ": SC locked\n");
-		msleep(1);
-	}
+	down(&dev->stream_mutex);
 	memset(&com, 0, sizeof(com));
 	com.cmd.hdr.Opcode = CMD_CONTROL;
 	com.cmd.hdr.Length = sizeof(struct FW_STREAM_CONTROL) - 2;
@@ -772,144 +712,7 @@ static int ngene_command_stream_control(struct ngene *dev, u8 stream,
 	return 0;
 }
 
-
-/****************************************************************************/
-/* I2C **********************************************************************/
-/****************************************************************************/
-
-static void ngene_i2c_set_bus(struct ngene *dev, int bus)
-{
-	if (!(dev->card_info->i2c_access & 2))
-		return;
-	if (dev->i2c_current_bus == bus)
-		return;
-
-	switch (bus) {
-	case 0:
-		ngene_command_gpio_set(dev, 3, 0);
-		ngene_command_gpio_set(dev, 2, 1);
-		break;
-
-	case 1:
-		ngene_command_gpio_set(dev, 2, 0);
-		ngene_command_gpio_set(dev, 3, 1);
-		break;
-	}
-	dev->i2c_current_bus = bus;
-}
-
-static int ngene_i2c_master_xfer(struct i2c_adapter *adapter,
-				 struct i2c_msg msg[], int num)
-{
-	struct ngene_channel *chan =
-		(struct ngene_channel *)i2c_get_adapdata(adapter);
-	struct ngene *dev = chan->dev;
-
-	down(&dev->i2c_switch_mutex);
-	ngene_i2c_set_bus(dev, chan->number);
-
-	if (num == 2 && msg[1].flags & I2C_M_RD && !(msg[0].flags & I2C_M_RD))
-		if (!ngene_command_i2c_read(dev, msg[0].addr,
-					    msg[0].buf, msg[0].len,
-					    msg[1].buf, msg[1].len, 0))
-			goto done;
-
-	if (num == 1 && !(msg[0].flags & I2C_M_RD))
-		if (!ngene_command_i2c_write(dev, msg[0].addr,
-					     msg[0].buf, msg[0].len))
-			goto done;
-	if (num == 1 && (msg[0].flags & I2C_M_RD))
-		if (!ngene_command_i2c_read(dev, msg[0].addr, 0, 0,
-					    msg[0].buf, msg[0].len, 0))
-			goto done;
-
-	up(&dev->i2c_switch_mutex);
-	return -EIO;
-
-done:
-	up(&dev->i2c_switch_mutex);
-	return num;
-}
-
-
-static u32 ngene_i2c_functionality(struct i2c_adapter *adap)
-{
-	return I2C_FUNC_SMBUS_EMUL;
-}
-
-static struct i2c_algorithm ngene_i2c_algo = {
-	.master_xfer = ngene_i2c_master_xfer,
-	.functionality = ngene_i2c_functionality,
-};
-
-static int ngene_i2c_init(struct ngene *dev, int dev_nr)
-{
-	struct i2c_adapter *adap = &(dev->channel[dev_nr].i2c_adapter);
-
-	i2c_set_adapdata(adap, &(dev->channel[dev_nr]));
-	adap->class = I2C_CLASS_TV_DIGITAL | I2C_CLASS_TV_ANALOG;
-
-	strcpy(adap->name, "nGene");
-
-	adap->algo = &ngene_i2c_algo;
-	adap->algo_data = (void *)&(dev->channel[dev_nr]);
-	adap->dev.parent = &dev->pci_dev->dev;
-
-	return i2c_add_adapter(adap);
-}
-
-
-/****************************************************************************/
-/* DVB functions and API interface ******************************************/
-/****************************************************************************/
-
-static void swap_buffer(u32 *p, u32 len)
-{
-	while (len) {
-		*p = swab32(*p);
-		p++;
-		len -= 4;
-	}
-}
-
-
-static void *tsin_exchange(void *priv, void *buf, u32 len, u32 clock, u32 flags)
-{
-	struct ngene_channel *chan = priv;
-
-
-#ifdef COMMAND_TIMEOUT_WORKAROUND
-	if (chan->users > 0)
-#endif
-		dvb_dmx_swfilter(&chan->demux, buf, len);
-	return 0;
-}
-
-u8 fill_ts[188] = { 0x47, 0x1f, 0xff, 0x10 };
-
-static void *tsout_exchange(void *priv, void *buf, u32 len,
-			    u32 clock, u32 flags)
-{
-	struct ngene_channel *chan = priv;
-	struct ngene *dev = chan->dev;
-	u32 alen;
-
-	alen = dvb_ringbuffer_avail(&dev->tsout_rbuf);
-	alen -= alen % 188;
-
-	if (alen < len)
-		FillTSBuffer(buf + alen, len - alen, flags);
-	else
-		alen = len;
-	dvb_ringbuffer_read(&dev->tsout_rbuf, buf, alen);
-	if (flags & DF_SWAP32)
-		swap_buffer((u32 *)buf, alen);
-	wake_up_interruptible(&dev->tsout_rbuf.queue);
-	return buf;
-}
-
-
-static void set_transfer(struct ngene_channel *chan, int state)
+void set_transfer(struct ngene_channel *chan, int state)
 {
 	u8 control = 0, mode = 0, flags = 0;
 	struct ngene *dev = chan->dev;
@@ -949,13 +752,11 @@ static void set_transfer(struct ngene_channel *chan, int state)
 		if (chan->mode & NGENE_IO_TSOUT) {
 			chan->pBufferExchange = tsout_exchange;
 			/* 0x66666666 = 50MHz *2^33 /250MHz */
-			chan->AudioDTOValue = 0x66666666;
-			/* set_dto(chan, 38810700+1000); */
-			/* set_dto(chan, 19392658); */
+			chan->AudioDTOValue = 0x80000000;
+			chan->AudioDTOUpdated = 1;
 		}
 		if (chan->mode & NGENE_IO_TSIN)
 			chan->pBufferExchange = tsin_exchange;
-		/* ngwritel(0, 0x9310); */
 		spin_unlock_irq(&chan->state_lock);
 	} else
 		;/* printk(KERN_INFO DEVICE_NAME ": lock=%08x\n",
@@ -970,83 +771,10 @@ static void set_transfer(struct ngene_channel *chan, int state)
 		       state);
 	if (!state) {
 		spin_lock_irq(&chan->state_lock);
-		chan->pBufferExchange = 0;
+		chan->pBufferExchange = NULL;
 		dvb_ringbuffer_flush(&dev->tsout_rbuf);
 		spin_unlock_irq(&chan->state_lock);
 	}
-}
-
-static int ngene_start_feed(struct dvb_demux_feed *dvbdmxfeed)
-{
-	struct dvb_demux *dvbdmx = dvbdmxfeed->demux;
-	struct ngene_channel *chan = dvbdmx->priv;
-
-	if (chan->users == 0) {
-#ifdef COMMAND_TIMEOUT_WORKAROUND
-		if (!chan->running)
-#endif
-			set_transfer(chan, 1);
-		/* msleep(10); */
-	}
-
-	return ++chan->users;
-}
-
-static int ngene_stop_feed(struct dvb_demux_feed *dvbdmxfeed)
-{
-	struct dvb_demux *dvbdmx = dvbdmxfeed->demux;
-	struct ngene_channel *chan = dvbdmx->priv;
-
-	if (--chan->users)
-		return chan->users;
-
-#ifndef COMMAND_TIMEOUT_WORKAROUND
-	set_transfer(chan, 0);
-#endif
-
-	return 0;
-}
-
-
-
-static int my_dvb_dmx_ts_card_init(struct dvb_demux *dvbdemux, char *id,
-				   int (*start_feed)(struct dvb_demux_feed *),
-				   int (*stop_feed)(struct dvb_demux_feed *),
-				   void *priv)
-{
-	dvbdemux->priv = priv;
-
-	dvbdemux->filternum = 256;
-	dvbdemux->feednum = 256;
-	dvbdemux->start_feed = start_feed;
-	dvbdemux->stop_feed = stop_feed;
-	dvbdemux->write_to_decoder = 0;
-	dvbdemux->dmx.capabilities = (DMX_TS_FILTERING |
-				      DMX_SECTION_FILTERING |
-				      DMX_MEMORY_BASED_FILTERING);
-	return dvb_dmx_init(dvbdemux);
-}
-
-static int my_dvb_dmxdev_ts_card_init(struct dmxdev *dmxdev,
-				      struct dvb_demux *dvbdemux,
-				      struct dmx_frontend *hw_frontend,
-				      struct dmx_frontend *mem_frontend,
-				      struct dvb_adapter *dvb_adapter)
-{
-	int ret;
-
-	dmxdev->filternum = 256;
-	dmxdev->demux = &dvbdemux->dmx;
-	dmxdev->capabilities = 0;
-	ret = dvb_dmxdev_init(dmxdev, dvb_adapter);
-	if (ret < 0)
-		return ret;
-
-	hw_frontend->source = DMX_FRONTEND_0;
-	dvbdemux->dmx.add_frontend(&dvbdemux->dmx, hw_frontend);
-	mem_frontend->source = DMX_MEMORY_FE;
-	dvbdemux->dmx.add_frontend(&dvbdemux->dmx, mem_frontend);
-	return dvbdemux->dmx.connect_frontend(&dvbdemux->dmx, hw_frontend);
 }
 
 
@@ -1094,8 +822,8 @@ static void free_idlebuffer(struct ngene *dev,
 		return;
 	free_ringbuffer(dev, rb);
 	for (j = 0; j < tb->NumBuffers; j++, Cur = Cur->Next) {
-		Cur->Buffer2 = 0;
-		Cur->scList2 = 0;
+		Cur->Buffer2 = NULL;
+		Cur->scList2 = NULL;
 		Cur->ngeneBuffer.Address_of_first_entry_2 = 0;
 		Cur->ngeneBuffer.Number_of_entries_2 = 0;
 	}
@@ -1141,7 +869,7 @@ static int create_ring_buffer(struct pci_dev *pci_dev,
 	u64 PARingBufferNext;
 	struct SBufferHeader *Cur, *Next;
 
-	descr->Head = 0;
+	descr->Head = NULL;
 	descr->MemSize = 0;
 	descr->PAHead = 0;
 	descr->NumBuffers = 0;
@@ -1441,6 +1169,7 @@ static void ngene_release_buffers(struct ngene *dev)
 		iounmap(dev->iomem);
 	free_common_buffers(dev);
 	vfree(dev->tsout_buf);
+	vfree(dev->tsin_buf);
 	vfree(dev->ain_buf);
 	vfree(dev->vin_buf);
 	vfree(dev);
@@ -1456,6 +1185,13 @@ static int ngene_get_buffers(struct ngene *dev)
 			return -ENOMEM;
 		dvb_ringbuffer_init(&dev->tsout_rbuf,
 				    dev->tsout_buf, TSOUT_BUF_SIZE);
+	}
+	if (dev->card_info->io_type[2]&NGENE_IO_TSIN) {
+		dev->tsin_buf = vmalloc(TSIN_BUF_SIZE);
+		if (!dev->tsin_buf)
+			return -ENOMEM;
+		dvb_ringbuffer_init(&dev->tsin_rbuf,
+				    dev->tsin_buf, TSIN_BUF_SIZE);
 	}
 	if (dev->card_info->io_type[2] & NGENE_IO_AIN) {
 		dev->ain_buf = vmalloc(AIN_BUF_SIZE);
@@ -1518,14 +1254,21 @@ static int ngene_load_firm(struct ngene *dev)
 		version = 15;
 		size = 23466;
 		fw_name = "ngene_15.fw";
+		dev->cmd_timeout_workaround = true;
 		break;
 	case 16:
 		size = 23498;
 		fw_name = "ngene_16.fw";
+		dev->cmd_timeout_workaround = true;
 		break;
 	case 17:
 		size = 24446;
 		fw_name = "ngene_17.fw";
+		dev->cmd_timeout_workaround = true;
+		break;
+	case 18:
+		size = 0;
+		fw_name = "ngene_18.fw";
 		break;
 	}
 
@@ -1536,6 +1279,8 @@ static int ngene_load_firm(struct ngene *dev)
 			": Copy %s to your hotplug directory!\n", fw_name);
 		return -1;
 	}
+	if (size == 0)
+		size = fw->size;
 	if (size != fw->size) {
 		printk(KERN_ERR DEVICE_NAME
 			": Firmware %s has invalid size!", fw_name);
@@ -1565,7 +1310,40 @@ static void ngene_stop(struct ngene *dev)
 	ngwritel(0, NGENE_EVENT);
 	ngwritel(0, NGENE_EVENT_HI);
 	free_irq(dev->pci_dev->irq, dev);
+#ifdef CONFIG_PCI_MSI
+	if (dev->msi_enabled)
+		pci_disable_msi(dev->pci_dev);
+#endif
 }
+
+static int ngene_buffer_config(struct ngene *dev)
+{
+	int stat;
+
+	if (dev->card_info->fw_version >= 17) {
+		u8 tsin12_config[6]   = { 0x60, 0x60, 0x00, 0x00, 0x00, 0x00 };
+		u8 tsin1234_config[6] = { 0x30, 0x30, 0x00, 0x30, 0x30, 0x00 };
+		u8 tsio1235_config[6] = { 0x30, 0x30, 0x00, 0x28, 0x00, 0x38 };
+		u8 *bconf = tsin12_config;
+
+		if (dev->card_info->io_type[2]&NGENE_IO_TSIN &&
+		    dev->card_info->io_type[3]&NGENE_IO_TSIN) {
+			bconf = tsin1234_config;
+			if (dev->card_info->io_type[4]&NGENE_IO_TSOUT &&
+			    dev->ci.en)
+				bconf = tsio1235_config;
+		}
+		stat = ngene_command_config_free_buf(dev, bconf);
+	} else {
+		int bconf = BUFFER_CONFIG_4422;
+
+		if (dev->card_info->io_type[3] == NGENE_IO_TSIN)
+			bconf = BUFFER_CONFIG_3333;
+		stat = ngene_command_config_buf(dev, bconf);
+	}
+	return stat;
+}
+
 
 static int ngene_start(struct ngene *dev)
 {
@@ -1599,6 +1377,30 @@ static int ngene_start(struct ngene *dev)
 	if (stat < 0)
 		goto fail;
 
+#ifdef CONFIG_PCI_MSI
+	/* enable MSI if kernel and card support it */
+	if (pci_msi_enabled() && dev->card_info->msi_supported) {
+		unsigned long flags;
+
+		ngwritel(0, NGENE_INT_ENABLE);
+		free_irq(dev->pci_dev->irq, dev);
+		stat = pci_enable_msi(dev->pci_dev);
+		if (stat) {
+			printk(KERN_INFO DEVICE_NAME
+				": MSI not available\n");
+			flags = IRQF_SHARED;
+		} else {
+			flags = 0;
+			dev->msi_enabled = true;
+		}
+		stat = request_irq(dev->pci_dev->irq, irq_handler,
+					flags, "nGene", dev);
+		if (stat < 0)
+			goto fail2;
+		ngwritel(1, NGENE_INT_ENABLE);
+	}
+#endif
+
 	stat = ngene_i2c_init(dev, 0);
 	if (stat < 0)
 		goto fail;
@@ -1607,94 +1409,19 @@ static int ngene_start(struct ngene *dev)
 	if (stat < 0)
 		goto fail;
 
-	if (dev->card_info->fw_version == 17) {
-		u8 tsin4_config[6] = {
-			3072 / 64, 3072 / 64, 0, 3072 / 64, 3072 / 64, 0};
-		u8 default_config[6] = {
-			4096 / 64, 4096 / 64, 0, 2048 / 64, 2048 / 64, 0};
-		u8 *bconf = default_config;
+	if (!stat)
+		return stat;
 
-		if (dev->card_info->io_type[3] == NGENE_IO_TSIN)
-			bconf = tsin4_config;
-		dprintk(KERN_DEBUG DEVICE_NAME ": FW 17 buffer config\n");
-		stat = ngene_command_config_free_buf(dev, bconf);
-	} else {
-		int bconf = BUFFER_CONFIG_4422;
-		if (dev->card_info->io_type[3] == NGENE_IO_TSIN)
-			bconf = BUFFER_CONFIG_3333;
-		stat = ngene_command_config_buf(dev, bconf);
-	}
-	return stat;
+	/* otherwise error: fall through */
 fail:
 	ngwritel(0, NGENE_INT_ENABLE);
 	free_irq(dev->pci_dev->irq, dev);
+#ifdef CONFIG_PCI_MSI
+fail2:
+	if (dev->msi_enabled)
+		pci_disable_msi(dev->pci_dev);
+#endif
 	return stat;
-}
-
-
-
-/****************************************************************************/
-/* Switch control (I2C gates, etc.) *****************************************/
-/****************************************************************************/
-
-
-/****************************************************************************/
-/* Demod/tuner attachment ***************************************************/
-/****************************************************************************/
-
-static int tuner_attach_stv6110(struct ngene_channel *chan)
-{
-	struct stv090x_config *feconf = (struct stv090x_config *)
-		chan->dev->card_info->fe_config[chan->number];
-	struct stv6110x_config *tunerconf = (struct stv6110x_config *)
-		chan->dev->card_info->tuner_config[chan->number];
-	struct stv6110x_devctl *ctl;
-
-	ctl = dvb_attach(stv6110x_attach, chan->fe, tunerconf,
-			 &chan->i2c_adapter);
-	if (ctl == NULL) {
-		printk(KERN_ERR	DEVICE_NAME ": No STV6110X found!\n");
-		return -ENODEV;
-	}
-
-	feconf->tuner_init          = ctl->tuner_init;
-	feconf->tuner_set_mode      = ctl->tuner_set_mode;
-	feconf->tuner_set_frequency = ctl->tuner_set_frequency;
-	feconf->tuner_get_frequency = ctl->tuner_get_frequency;
-	feconf->tuner_set_bandwidth = ctl->tuner_set_bandwidth;
-	feconf->tuner_get_bandwidth = ctl->tuner_get_bandwidth;
-	feconf->tuner_set_bbgain    = ctl->tuner_set_bbgain;
-	feconf->tuner_get_bbgain    = ctl->tuner_get_bbgain;
-	feconf->tuner_set_refclk    = ctl->tuner_set_refclk;
-	feconf->tuner_get_status    = ctl->tuner_get_status;
-
-	return 0;
-}
-
-
-static int demod_attach_stv0900(struct ngene_channel *chan)
-{
-	struct stv090x_config *feconf = (struct stv090x_config *)
-		chan->dev->card_info->fe_config[chan->number];
-
-	chan->fe = dvb_attach(stv090x_attach,
-			feconf,
-			&chan->i2c_adapter,
-			chan->number == 0 ? STV090x_DEMODULATOR_0 :
-					    STV090x_DEMODULATOR_1);
-	if (chan->fe == NULL) {
-		printk(KERN_ERR	DEVICE_NAME ": No STV0900 found!\n");
-		return -ENODEV;
-	}
-
-	if (!dvb_attach(lnbh24_attach, chan->fe, &chan->i2c_adapter, 0,
-			0, chan->dev->card_info->lnb[chan->number])) {
-		printk(KERN_ERR DEVICE_NAME ": No LNBH24 found!\n");
-		dvb_frontend_detach(chan->fe);
-		return -ENODEV;
-	}
-
-	return 0;
 }
 
 /****************************************************************************/
@@ -1705,22 +1432,28 @@ static void release_channel(struct ngene_channel *chan)
 {
 	struct dvb_demux *dvbdemux = &chan->demux;
 	struct ngene *dev = chan->dev;
-	struct ngene_info *ni = dev->card_info;
-	int io = ni->io_type[chan->number];
 
-#ifdef COMMAND_TIMEOUT_WORKAROUND
 	if (chan->running)
 		set_transfer(chan, 0);
-#endif
 
 	tasklet_kill(&chan->demux_tasklet);
 
-	if (io & (NGENE_IO_TSIN | NGENE_IO_TSOUT)) {
-		if (chan->fe) {
-			dvb_unregister_frontend(chan->fe);
-			dvb_frontend_detach(chan->fe);
-			chan->fe = 0;
-		}
+	if (chan->ci_dev) {
+		dvb_unregister_device(chan->ci_dev);
+		chan->ci_dev = NULL;
+	}
+
+	if (chan->fe2)
+		dvb_unregister_frontend(chan->fe2);
+
+	if (chan->fe) {
+		dvb_unregister_frontend(chan->fe);
+		dvb_frontend_detach(chan->fe);
+		chan->fe = NULL;
+	}
+
+	if (chan->has_demux) {
+		dvb_net_release(&chan->dvbnet);
 		dvbdemux->dmx.close(&dvbdemux->dmx);
 		dvbdemux->dmx.remove_frontend(&dvbdemux->dmx,
 					      &chan->hw_frontend);
@@ -1728,9 +1461,12 @@ static void release_channel(struct ngene_channel *chan)
 					      &chan->mem_frontend);
 		dvb_dmxdev_release(&chan->dmxdev);
 		dvb_dmx_release(&chan->demux);
+		chan->has_demux = false;
+	}
 
-		if (chan->number == 0 || !one_adapter)
-			dvb_unregister_adapter(&dev->adapter[chan->number]);
+	if (chan->has_adapter) {
+		dvb_unregister_adapter(&dev->adapter[chan->number]);
+		chan->has_adapter = false;
 	}
 }
 
@@ -1748,48 +1484,87 @@ static int init_channel(struct ngene_channel *chan)
 	chan->type = io;
 	chan->mode = chan->type;	/* for now only one mode */
 
+	if (io & NGENE_IO_TSIN) {
+		chan->fe = NULL;
+		if (ni->demod_attach[nr]) {
+			ret = ni->demod_attach[nr](chan);
+			if (ret < 0)
+				goto err;
+		}
+		if (chan->fe && ni->tuner_attach[nr]) {
+			ret = ni->tuner_attach[nr](chan);
+			if (ret < 0)
+				goto err;
+		}
+	}
+
+	if (!dev->ci.en && (io & NGENE_IO_TSOUT))
+		return 0;
+
 	if (io & (NGENE_IO_TSIN | NGENE_IO_TSOUT)) {
 		if (nr >= STREAM_AUDIOIN1)
 			chan->DataFormatFlags = DF_SWAP32;
-		if (nr == 0 || !one_adapter) {
+
+		if (nr == 0 || !one_adapter || dev->first_adapter == NULL) {
 			adapter = &dev->adapter[nr];
 			ret = dvb_register_adapter(adapter, "nGene",
 						   THIS_MODULE,
 						   &chan->dev->pci_dev->dev,
 						   adapter_nr);
 			if (ret < 0)
-				return ret;
-		} else {
-			adapter = &dev->adapter[0];
-		}
+				goto err;
+			if (dev->first_adapter == NULL)
+				dev->first_adapter = adapter;
+			chan->has_adapter = true;
+		} else
+			adapter = dev->first_adapter;
+	}
 
+	if (dev->ci.en && (io & NGENE_IO_TSOUT)) {
+		dvb_ca_en50221_init(adapter, dev->ci.en, 0, 1);
+		set_transfer(chan, 1);
+		chan->dev->channel[2].DataFormatFlags = DF_SWAP32;
+		set_transfer(&chan->dev->channel[2], 1);
+		dvb_register_device(adapter, &chan->ci_dev,
+				    &ngene_dvbdev_ci, (void *) chan,
+				    DVB_DEVICE_SEC);
+		if (!chan->ci_dev)
+			goto err;
+	}
+
+	if (chan->fe) {
+		if (dvb_register_frontend(adapter, chan->fe) < 0)
+			goto err;
+		chan->has_demux = true;
+	}
+	if (chan->fe2) {
+		if (dvb_register_frontend(adapter, chan->fe2) < 0)
+			goto err;
+		chan->fe2->tuner_priv = chan->fe->tuner_priv;
+		memcpy(&chan->fe2->ops.tuner_ops,
+		       &chan->fe->ops.tuner_ops,
+		       sizeof(struct dvb_tuner_ops));
+	}
+
+	if (chan->has_demux) {
 		ret = my_dvb_dmx_ts_card_init(dvbdemux, "SW demux",
 					      ngene_start_feed,
 					      ngene_stop_feed, chan);
 		ret = my_dvb_dmxdev_ts_card_init(&chan->dmxdev, &chan->demux,
 						 &chan->hw_frontend,
 						 &chan->mem_frontend, adapter);
+		ret = dvb_net_init(adapter, &chan->dvbnet, &chan->demux.dmx);
 	}
 
-	if (io & NGENE_IO_TSIN) {
-		chan->fe = NULL;
-		if (ni->demod_attach[nr])
-			ni->demod_attach[nr](chan);
-		if (chan->fe) {
-			if (dvb_register_frontend(adapter, chan->fe) < 0) {
-				if (chan->fe->ops.release)
-					chan->fe->ops.release(chan->fe);
-				chan->fe = NULL;
-			}
-		}
-		if (chan->fe && ni->tuner_attach[nr])
-			if (ni->tuner_attach[nr] (chan) < 0) {
-				printk(KERN_ERR DEVICE_NAME
-				       ": Tuner attach failed on channel %d!\n",
-				       nr);
-			}
-	}
 	return ret;
+
+err:
+	if (chan->fe) {
+		dvb_frontend_detach(chan->fe);
+		chan->fe = NULL;
+	}
+	release_channel(chan);
+	return 0;
 }
 
 static int init_channels(struct ngene *dev)
@@ -1797,6 +1572,7 @@ static int init_channels(struct ngene *dev)
 	int i, j;
 
 	for (i = 0; i < MAX_STREAM; i++) {
+		dev->channel[i].number = i;
 		if (init_channel(&dev->channel[i]) < 0) {
 			for (j = i - 1; j >= 0; j--)
 				release_channel(&dev->channel[j]);
@@ -1806,26 +1582,86 @@ static int init_channels(struct ngene *dev)
 	return 0;
 }
 
+static struct cxd2099_cfg cxd_cfg = {
+	.bitrate = 62000,
+	.adr = 0x40,
+	.polarity = 0,
+	.clock_mode = 0,
+};
+
+static void cxd_attach(struct ngene *dev)
+{
+	struct ngene_ci *ci = &dev->ci;
+
+	ci->en = cxd2099_attach(&cxd_cfg, dev, &dev->channel[0].i2c_adapter);
+	ci->dev = dev;
+	return;
+}
+
+static void cxd_detach(struct ngene *dev)
+{
+	struct ngene_ci *ci = &dev->ci;
+
+	dvb_ca_en50221_release(ci->en);
+	kfree(ci->en);
+	ci->en = 0;
+}
+
+/***********************************/
+/* workaround for shutdown failure */
+/***********************************/
+
+static void ngene_unlink(struct ngene *dev)
+{
+	struct ngene_command com;
+
+	com.cmd.hdr.Opcode = CMD_MEM_WRITE;
+	com.cmd.hdr.Length = 3;
+	com.cmd.MemoryWrite.address = 0x910c;
+	com.cmd.MemoryWrite.data = 0xff;
+	com.in_len = 3;
+	com.out_len = 1;
+
+	down(&dev->cmd_mutex);
+	ngwritel(0, NGENE_INT_ENABLE);
+	ngene_command_mutex(dev, &com);
+	up(&dev->cmd_mutex);
+}
+
+void ngene_shutdown(struct pci_dev *pdev)
+{
+	struct ngene *dev = (struct ngene *)pci_get_drvdata(pdev);
+
+	if (!dev || !shutdown_workaround)
+		return;
+
+	printk(KERN_INFO DEVICE_NAME ": shutdown workaround...\n");
+	ngene_unlink(dev);
+	pci_disable_device(pdev);
+}
+
 /****************************************************************************/
 /* device probe/remove calls ************************************************/
 /****************************************************************************/
 
-static void __devexit ngene_remove(struct pci_dev *pdev)
+void __devexit ngene_remove(struct pci_dev *pdev)
 {
-	struct ngene *dev = (struct ngene *)pci_get_drvdata(pdev);
+	struct ngene *dev = pci_get_drvdata(pdev);
 	int i;
 
 	tasklet_kill(&dev->event_tasklet);
 	for (i = MAX_STREAM - 1; i >= 0; i--)
 		release_channel(&dev->channel[i]);
+	if (dev->ci.en)
+		cxd_detach(dev);
 	ngene_stop(dev);
 	ngene_release_buffers(dev);
-	pci_set_drvdata(pdev, 0);
+	pci_set_drvdata(pdev, NULL);
 	pci_disable_device(pdev);
 }
 
-static int __devinit ngene_probe(struct pci_dev *pci_dev,
-				 const struct pci_device_id *id)
+int __devinit ngene_probe(struct pci_dev *pci_dev,
+			  const struct pci_device_id *id)
 {
 	struct ngene *dev;
 	int stat = 0;
@@ -1833,12 +1669,11 @@ static int __devinit ngene_probe(struct pci_dev *pci_dev,
 	if (pci_enable_device(pci_dev) < 0)
 		return -ENODEV;
 
-	dev = vmalloc(sizeof(struct ngene));
+	dev = vzalloc(sizeof(struct ngene));
 	if (dev == NULL) {
 		stat = -ENOMEM;
 		goto fail0;
 	}
-	memset(dev, 0, sizeof(struct ngene));
 
 	dev->pci_dev = pci_dev;
 	dev->card_info = (struct ngene_info *)id->driver_data;
@@ -1854,6 +1689,13 @@ static int __devinit ngene_probe(struct pci_dev *pci_dev,
 	if (stat < 0)
 		goto fail1;
 
+	cxd_attach(dev);
+
+	stat = ngene_buffer_config(dev);
+	if (stat < 0)
+		goto fail1;
+
+
 	dev->i2c_current_bus = -1;
 
 	/* Register DVB adapters and devices for both channels */
@@ -1868,156 +1710,6 @@ fail1:
 	ngene_release_buffers(dev);
 fail0:
 	pci_disable_device(pci_dev);
-	pci_set_drvdata(pci_dev, 0);
+	pci_set_drvdata(pci_dev, NULL);
 	return stat;
 }
-
-/****************************************************************************/
-/* Card configs *************************************************************/
-/****************************************************************************/
-
-static struct stv090x_config fe_cineS2 = {
-	.device         = STV0900,
-	.demod_mode     = STV090x_DUAL,
-	.clk_mode       = STV090x_CLK_EXT,
-
-	.xtal           = 27000000,
-	.address        = 0x68,
-
-	.ts1_mode       = STV090x_TSMODE_SERIAL_PUNCTURED,
-	.ts2_mode       = STV090x_TSMODE_SERIAL_PUNCTURED,
-
-	.repeater_level = STV090x_RPTLEVEL_16,
-
-	.adc1_range	= STV090x_ADC_1Vpp,
-	.adc2_range	= STV090x_ADC_1Vpp,
-
-	.diseqc_envelope_mode = true,
-};
-
-static struct stv6110x_config tuner_cineS2_0 = {
-	.addr	= 0x60,
-	.refclk	= 27000000,
-	.clk_div = 1,
-};
-
-static struct stv6110x_config tuner_cineS2_1 = {
-	.addr	= 0x63,
-	.refclk	= 27000000,
-	.clk_div = 1,
-};
-
-static struct ngene_info ngene_info_cineS2 = {
-	.type		= NGENE_SIDEWINDER,
-	.name		= "Linux4Media cineS2 DVB-S2 Twin Tuner",
-	.io_type	= {NGENE_IO_TSIN, NGENE_IO_TSIN},
-	.demod_attach	= {demod_attach_stv0900, demod_attach_stv0900},
-	.tuner_attach	= {tuner_attach_stv6110, tuner_attach_stv6110},
-	.fe_config	= {&fe_cineS2, &fe_cineS2},
-	.tuner_config	= {&tuner_cineS2_0, &tuner_cineS2_1},
-	.lnb		= {0x0b, 0x08},
-	.tsf		= {3, 3},
-	.fw_version	= 15,
-};
-
-static struct ngene_info ngene_info_satixs2 = {
-	.type		= NGENE_SIDEWINDER,
-	.name		= "Mystique SaTiX-S2 Dual",
-	.io_type	= {NGENE_IO_TSIN, NGENE_IO_TSIN},
-	.demod_attach	= {demod_attach_stv0900, demod_attach_stv0900},
-	.tuner_attach	= {tuner_attach_stv6110, tuner_attach_stv6110},
-	.fe_config	= {&fe_cineS2, &fe_cineS2},
-	.tuner_config	= {&tuner_cineS2_0, &tuner_cineS2_1},
-	.lnb		= {0x0b, 0x08},
-	.tsf		= {3, 3},
-	.fw_version	= 15,
-};
-
-/****************************************************************************/
-
-
-
-/****************************************************************************/
-/* PCI Subsystem ID *********************************************************/
-/****************************************************************************/
-
-#define NGENE_ID(_subvend, _subdev, _driverdata) { \
-	.vendor = NGENE_VID, .device = NGENE_PID, \
-	.subvendor = _subvend, .subdevice = _subdev, \
-	.driver_data = (unsigned long) &_driverdata }
-
-/****************************************************************************/
-
-static const struct pci_device_id ngene_id_tbl[] __devinitdata = {
-	NGENE_ID(0x18c3, 0xabc3, ngene_info_cineS2),
-	NGENE_ID(0x18c3, 0xabc4, ngene_info_cineS2),
-	NGENE_ID(0x18c3, 0xdb01, ngene_info_satixs2),
-	{0}
-};
-MODULE_DEVICE_TABLE(pci, ngene_id_tbl);
-
-/****************************************************************************/
-/* Init/Exit ****************************************************************/
-/****************************************************************************/
-
-static pci_ers_result_t ngene_error_detected(struct pci_dev *dev,
-					     enum pci_channel_state state)
-{
-	printk(KERN_ERR DEVICE_NAME ": PCI error\n");
-	if (state == pci_channel_io_perm_failure)
-		return PCI_ERS_RESULT_DISCONNECT;
-	if (state == pci_channel_io_frozen)
-		return PCI_ERS_RESULT_NEED_RESET;
-	return PCI_ERS_RESULT_CAN_RECOVER;
-}
-
-static pci_ers_result_t ngene_link_reset(struct pci_dev *dev)
-{
-	printk(KERN_INFO DEVICE_NAME ": link reset\n");
-	return 0;
-}
-
-static pci_ers_result_t ngene_slot_reset(struct pci_dev *dev)
-{
-	printk(KERN_INFO DEVICE_NAME ": slot reset\n");
-	return 0;
-}
-
-static void ngene_resume(struct pci_dev *dev)
-{
-	printk(KERN_INFO DEVICE_NAME ": resume\n");
-}
-
-static struct pci_error_handlers ngene_errors = {
-	.error_detected = ngene_error_detected,
-	.link_reset = ngene_link_reset,
-	.slot_reset = ngene_slot_reset,
-	.resume = ngene_resume,
-};
-
-static struct pci_driver ngene_pci_driver = {
-	.name        = "ngene",
-	.id_table    = ngene_id_tbl,
-	.probe       = ngene_probe,
-	.remove      = __devexit_p(ngene_remove),
-	.err_handler = &ngene_errors,
-};
-
-static __init int module_init_ngene(void)
-{
-	printk(KERN_INFO
-	       "nGene PCIE bridge driver, Copyright (C) 2005-2007 Micronas\n");
-	return pci_register_driver(&ngene_pci_driver);
-}
-
-static __exit void module_exit_ngene(void)
-{
-	pci_unregister_driver(&ngene_pci_driver);
-}
-
-module_init(module_init_ngene);
-module_exit(module_exit_ngene);
-
-MODULE_DESCRIPTION("nGene");
-MODULE_AUTHOR("Micronas, Ralph Metzler, Manfred Voelkel");
-MODULE_LICENSE("GPL");

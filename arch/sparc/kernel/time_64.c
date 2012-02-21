@@ -9,7 +9,7 @@
  */
 
 #include <linux/errno.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/param.h>
@@ -419,12 +419,12 @@ static struct platform_device rtc_cmos_device = {
 	.num_resources	= 1,
 };
 
-static int __devinit rtc_probe(struct of_device *op, const struct of_device_id *match)
+static int __devinit rtc_probe(struct platform_device *op)
 {
 	struct resource *r;
 
 	printk(KERN_INFO "%s: RTC regs at 0x%llx\n",
-	       op->node->full_name, op->resource[0].start);
+	       op->dev.of_node->full_name, op->resource[0].start);
 
 	/* The CMOS RTC driver only accepts IORESOURCE_IO, so cons
 	 * up a fake resource so that the probe works for all cases.
@@ -442,7 +442,7 @@ static int __devinit rtc_probe(struct of_device *op, const struct of_device_id *
 	return platform_device_register(&rtc_cmos_device);
 }
 
-static struct of_device_id __initdata rtc_match[] = {
+static const struct of_device_id rtc_match[] = {
 	{
 		.name = "rtc",
 		.compatible = "m5819",
@@ -462,11 +462,12 @@ static struct of_device_id __initdata rtc_match[] = {
 	{},
 };
 
-static struct of_platform_driver rtc_driver = {
-	.match_table	= rtc_match,
+static struct platform_driver rtc_driver = {
 	.probe		= rtc_probe,
-	.driver		= {
-		.name	= "rtc",
+	.driver = {
+		.name = "rtc",
+		.owner = THIS_MODULE,
+		.of_match_table = rtc_match,
 	},
 };
 
@@ -476,17 +477,17 @@ static struct platform_device rtc_bq4802_device = {
 	.num_resources	= 1,
 };
 
-static int __devinit bq4802_probe(struct of_device *op, const struct of_device_id *match)
+static int __devinit bq4802_probe(struct platform_device *op)
 {
 
 	printk(KERN_INFO "%s: BQ4802 regs at 0x%llx\n",
-	       op->node->full_name, op->resource[0].start);
+	       op->dev.of_node->full_name, op->resource[0].start);
 
 	rtc_bq4802_device.resource = &op->resource[0];
 	return platform_device_register(&rtc_bq4802_device);
 }
 
-static struct of_device_id __initdata bq4802_match[] = {
+static const struct of_device_id bq4802_match[] = {
 	{
 		.name = "rtc",
 		.compatible = "bq4802",
@@ -494,11 +495,12 @@ static struct of_device_id __initdata bq4802_match[] = {
 	{},
 };
 
-static struct of_platform_driver bq4802_driver = {
-	.match_table	= bq4802_match,
+static struct platform_driver bq4802_driver = {
 	.probe		= bq4802_probe,
-	.driver		= {
-		.name	= "bq4802",
+	.driver = {
+		.name = "bq4802",
+		.owner = THIS_MODULE,
+		.of_match_table = bq4802_match,
 	},
 };
 
@@ -532,9 +534,9 @@ static struct platform_device m48t59_rtc = {
 	},
 };
 
-static int __devinit mostek_probe(struct of_device *op, const struct of_device_id *match)
+static int __devinit mostek_probe(struct platform_device *op)
 {
-	struct device_node *dp = op->node;
+	struct device_node *dp = op->dev.of_node;
 
 	/* On an Enterprise system there can be multiple mostek clocks.
 	 * We should only match the one that is on the central FHC bus.
@@ -550,18 +552,19 @@ static int __devinit mostek_probe(struct of_device *op, const struct of_device_i
 	return platform_device_register(&m48t59_rtc);
 }
 
-static struct of_device_id __initdata mostek_match[] = {
+static const struct of_device_id mostek_match[] = {
 	{
 		.name = "eeprom",
 	},
 	{},
 };
 
-static struct of_platform_driver mostek_driver = {
-	.match_table	= mostek_match,
+static struct platform_driver mostek_driver = {
 	.probe		= mostek_probe,
-	.driver		= {
-		.name	= "mostek",
+	.driver = {
+		.name = "mostek",
+		.owner = THIS_MODULE,
+		.of_match_table = mostek_match,
 	},
 };
 
@@ -583,9 +586,9 @@ static int __init clock_init(void)
 	if (tlb_type == hypervisor)
 		return platform_device_register(&rtc_sun4v_device);
 
-	(void) of_register_driver(&rtc_driver, &of_platform_bus_type);
-	(void) of_register_driver(&mostek_driver, &of_platform_bus_type);
-	(void) of_register_driver(&bq4802_driver, &of_platform_bus_type);
+	(void) platform_driver_register(&rtc_driver);
+	(void) platform_driver_register(&mostek_driver);
+	(void) platform_driver_register(&bq4802_driver);
 
 	return 0;
 }
@@ -705,7 +708,7 @@ static void sparc64_timer_setup(enum clock_event_mode mode,
 	case CLOCK_EVT_MODE_UNUSED:
 		WARN_ON(1);
 		break;
-	};
+	}
 }
 
 static struct clock_event_device sparc64_clockevent = {
@@ -813,13 +816,11 @@ void __init time_init(void)
 		clocksource_hz2mult(freq, SPARC64_NSEC_PER_CYC_SHIFT);
 
 	clocksource_tick.name = tick_ops->name;
-	clocksource_calc_mult_shift(&clocksource_tick, freq, 4);
 	clocksource_tick.read = clocksource_tick_read;
 
+	clocksource_register_hz(&clocksource_tick, freq);
 	printk("clocksource: mult[%x] shift[%d]\n",
 	       clocksource_tick.mult, clocksource_tick.shift);
-
-	clocksource_register(&clocksource_tick);
 
 	sparc64_clockevent.name = tick_ops->name;
 	clockevents_calc_mult_shift(&sparc64_clockevent, freq, 4);

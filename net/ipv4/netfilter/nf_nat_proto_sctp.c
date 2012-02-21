@@ -10,20 +10,21 @@
 #include <linux/init.h>
 #include <linux/ip.h>
 #include <linux/sctp.h>
+#include <linux/module.h>
 #include <net/sctp/checksum.h>
 
 #include <net/netfilter/nf_nat_protocol.h>
 
 static u_int16_t nf_sctp_port_rover;
 
-static bool
+static void
 sctp_unique_tuple(struct nf_conntrack_tuple *tuple,
 		  const struct nf_nat_range *range,
 		  enum nf_nat_manip_type maniptype,
 		  const struct nf_conn *ct)
 {
-	return nf_nat_proto_unique_tuple(tuple, range, maniptype, ct,
-					 &nf_sctp_port_rover);
+	nf_nat_proto_unique_tuple(tuple, range, maniptype, ct,
+				  &nf_sctp_port_rover);
 }
 
 static bool

@@ -12,6 +12,7 @@
 #include <linux/suspend.h>
 #include <linux/syscalls.h>
 #include <linux/reboot.h>
+#include <linux/kmod.h>
 #include <linux/string.h>
 #include <linux/device.h>
 #include <linux/miscdevice.h>
@@ -113,8 +114,10 @@ static int snapshot_open(struct inode *inode, struct file *filp)
 		if (error)
 			pm_notifier_call_chain(PM_POST_RESTORE);
 	}
-	if (error)
+	if (error) {
+		free_basic_memory_bitmaps();
 		atomic_inc(&snapshot_device_available);
+	}
 	data->frozen = 0;
 	data->ready = 0;
 	data->platform_support = 0;
@@ -135,9 +138,11 @@ static int snapshot_release(struct inode *inode, struct file *filp)
 	free_basic_memory_bitmaps();
 	data = filp->private_data;
 	free_all_swap_pages(data->swap);
-	if (data->frozen)
+	if (data->frozen) {
+		pm_restore_gfp_mask();
 		thaw_processes();
-	pm_notifier_call_chain(data->mode == O_WRONLY ?
+	}
+	pm_notifier_call_chain(data->mode == O_RDONLY ?
 			PM_POST_HIBERNATION : PM_POST_RESTORE);
 	atomic_inc(&snapshot_device_available);
 
@@ -151,6 +156,7 @@ static ssize_t snapshot_read(struct file *filp, char __user *buf,
 {
 	struct snapshot_data *data;
 	ssize_t res;
+	loff_t pg_offp = *offp & ~PAGE_MASK;
 
 	mutex_lock(&pm_mutex);
 
@@ -159,13 +165,18 @@ static ssize_t snapshot_read(struct file *filp, char __user *buf,
 		res = -ENODATA;
 		goto Unlock;
 	}
-	res = snapshot_read_next(&data->handle, count);
-	if (res > 0) {
-		if (copy_to_user(buf, data_of(data->handle), res))
-			res = -EFAULT;
-		else
-			*offp = data->handle.offset;
+	if (!pg_offp) { /* on page boundary? */
+		res = snapshot_read_next(&data->handle);
+		if (res <= 0)
+			goto Unlock;
+	} else {
+		res = PAGE_SIZE - pg_offp;
 	}
+
+	res = simple_read_from_buffer(buf, count, &pg_offp,
+			data_of(data->handle), res);
+	if (res > 0)
+		*offp += res;
 
  Unlock:
 	mutex_unlock(&pm_mutex);
@@ -178,18 +189,25 @@ static ssize_t snapshot_write(struct file *filp, const char __user *buf,
 {
 	struct snapshot_data *data;
 	ssize_t res;
+	loff_t pg_offp = *offp & ~PAGE_MASK;
 
 	mutex_lock(&pm_mutex);
 
 	data = filp->private_data;
-	res = snapshot_write_next(&data->handle, count);
-	if (res > 0) {
-		if (copy_from_user(data_of(data->handle), buf, res))
-			res = -EFAULT;
-		else
-			*offp = data->handle.offset;
+
+	if (!pg_offp) {
+		res = snapshot_write_next(&data->handle);
+		if (res <= 0)
+			goto unlock;
+	} else {
+		res = PAGE_SIZE - pg_offp;
 	}
 
+	res = simple_write_to_buffer(data_of(data->handle), res, &pg_offp,
+			buf, count);
+	if (res > 0)
+		*offp += res;
+unlock:
 	mutex_unlock(&pm_mutex);
 
 	return res;
@@ -250,6 +268,7 @@ static long snapshot_ioctl(struct file *filp, unsigned int cmd,
 	case SNAPSHOT_UNFREEZE:
 		if (!data->frozen || data->ready)
 			break;
+		pm_restore_gfp_mask();
 		thaw_processes();
 		usermodehelper_enable();
 		data->frozen = 0;
@@ -262,6 +281,7 @@ static long snapshot_ioctl(struct file *filp, unsigned int cmd,
 			error = -EPERM;
 			break;
 		}
+		pm_restore_gfp_mask();
 		error = hibernation_snapshot(data->platform_support);
 		if (!error)
 			error = put_user(in_suspend, (int __user *)arg);
@@ -364,6 +384,7 @@ static long snapshot_ioctl(struct file *filp, unsigned int cmd,
 		 * PM_HIBERNATION_PREPARE
 		 */
 		error = suspend_devices_and_enter(PM_SUSPEND_MEM);
+		data->ready = 0;
 		break;
 
 	case SNAPSHOT_PLATFORM_SUPPORT:

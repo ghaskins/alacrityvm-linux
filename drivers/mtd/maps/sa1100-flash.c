@@ -131,10 +131,8 @@ struct sa_subdev_info {
 };
 
 struct sa_info {
-	struct mtd_partition	*parts;
 	struct mtd_info		*mtd;
 	int			num_subdev;
-	unsigned int		nr_parts;
 	struct sa_subdev_info	subdev[0];
 };
 
@@ -226,19 +224,10 @@ static void sa1100_destroy(struct sa_info *info, struct flash_platform_data *pla
 	int i;
 
 	if (info->mtd) {
-		if (info->nr_parts == 0)
-			del_mtd_device(info->mtd);
-#ifdef CONFIG_MTD_PARTITIONS
-		else
-			del_mtd_partitions(info->mtd);
-#endif
-#ifdef CONFIG_MTD_CONCAT
+		mtd_device_unregister(info->mtd);
 		if (info->mtd != info->subdev[0].mtd)
 			mtd_concat_destroy(info->mtd);
-#endif
 	}
-
-	kfree(info->parts);
 
 	for (i = info->num_subdev - 1; i >= 0; i--)
 		sa1100_destroy_subdev(&info->subdev[i]);
@@ -321,7 +310,6 @@ sa1100_setup_mtd(struct platform_device *pdev, struct flash_platform_data *plat)
 		info->mtd = info->subdev[0].mtd;
 		ret = 0;
 	} else if (info->num_subdev > 1) {
-#ifdef CONFIG_MTD_CONCAT
 		struct mtd_info *cdev[nr];
 		/*
 		 * We detected multiple devices.  Concatenate them together.
@@ -333,11 +321,6 @@ sa1100_setup_mtd(struct platform_device *pdev, struct flash_platform_data *plat)
 					      plat->name);
 		if (info->mtd == NULL)
 			ret = -ENXIO;
-#else
-		printk(KERN_ERR "SA1100 flash: multiple devices "
-		       "found but MTD concat support disabled.\n");
-		ret = -ENXIO;
-#endif
 	}
 
 	if (ret == 0)
@@ -354,10 +337,8 @@ static const char *part_probes[] = { "cmdlinepart", "RedBoot", NULL };
 static int __devinit sa1100_mtd_probe(struct platform_device *pdev)
 {
 	struct flash_platform_data *plat = pdev->dev.platform_data;
-	struct mtd_partition *parts;
-	const char *part_type = NULL;
 	struct sa_info *info;
-	int err, nr_parts = 0;
+	int err;
 
 	if (!plat)
 		return -ENODEV;
@@ -371,30 +352,8 @@ static int __devinit sa1100_mtd_probe(struct platform_device *pdev)
 	/*
 	 * Partition selection stuff.
 	 */
-#ifdef CONFIG_MTD_PARTITIONS
-	nr_parts = parse_mtd_partitions(info->mtd, part_probes, &parts, 0);
-	if (nr_parts > 0) {
-		info->parts = parts;
-		part_type = "dynamic";
-	} else
-#endif
-	{
-		parts = plat->parts;
-		nr_parts = plat->nr_parts;
-		part_type = "static";
-	}
-
-	if (nr_parts == 0) {
-		printk(KERN_NOTICE "SA1100 flash: no partition info "
-			"available, registering whole flash\n");
-		add_mtd_device(info->mtd);
-	} else {
-		printk(KERN_NOTICE "SA1100 flash: using %s partition "
-			"definition\n", part_type);
-		add_mtd_partitions(info->mtd, parts, nr_parts);
-	}
-
-	info->nr_parts = nr_parts;
+	mtd_device_parse_register(info->mtd, part_probes, 0,
+			plat->parts, plat->nr_parts);
 
 	platform_set_drvdata(pdev, info);
 	err = 0;

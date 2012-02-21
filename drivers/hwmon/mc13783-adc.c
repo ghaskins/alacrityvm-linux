@@ -18,7 +18,7 @@
  * Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include <linux/mfd/mc13783-private.h>
+#include <linux/mfd/mc13783.h>
 #include <linux/platform_device.h>
 #include <linux/hwmon-sysfs.h>
 #include <linux/kernel.h>
@@ -31,7 +31,7 @@
 #define MC13783_ADC_NAME	"mc13783-adc"
 
 struct mc13783_adc_priv {
-	struct mc13783 *mc13783;
+	struct mc13xxx *mc13xxx;
 	struct device *hwmon_dev;
 };
 
@@ -51,8 +51,8 @@ static int mc13783_adc_read(struct device *dev,
 	unsigned int sample[4];
 	int ret;
 
-	ret = mc13783_adc_do_conversion(priv->mc13783,
-			MC13783_ADC_MODE_MULT_CHAN,
+	ret = mc13xxx_adc_do_conversion(priv->mc13xxx,
+			MC13XXX_ADC_MODE_MULT_CHAN,
 			channel, sample);
 	if (ret)
 		return ret;
@@ -144,6 +144,14 @@ static const struct attribute_group mc13783_group_ts = {
 	.attrs = mc13783_attr_ts,
 };
 
+static int mc13783_adc_use_touchscreen(struct platform_device *pdev)
+{
+	struct mc13783_adc_priv *priv = platform_get_drvdata(pdev);
+	unsigned flags = mc13xxx_get_flags(priv->mc13xxx);
+
+	return flags & MC13XXX_USE_TOUCHSCREEN;
+}
+
 static int __init mc13783_adc_probe(struct platform_device *pdev)
 {
 	struct mc13783_adc_priv *priv;
@@ -153,7 +161,7 @@ static int __init mc13783_adc_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 
-	priv->mc13783 = dev_get_drvdata(pdev->dev.parent);
+	priv->mc13xxx = dev_get_drvdata(pdev->dev.parent);
 
 	platform_set_drvdata(pdev, priv);
 
@@ -162,10 +170,11 @@ static int __init mc13783_adc_probe(struct platform_device *pdev)
 	if (ret)
 		goto out_err_create1;
 
-	if (!(priv->mc13783->flags & MC13783_USE_TOUCHSCREEN))
+	if (!mc13783_adc_use_touchscreen(pdev)) {
 		ret = sysfs_create_group(&pdev->dev.kobj, &mc13783_group_ts);
 		if (ret)
 			goto out_err_create2;
+	}
 
 	priv->hwmon_dev = hwmon_device_register(&pdev->dev);
 	if (IS_ERR(priv->hwmon_dev)) {
@@ -180,7 +189,7 @@ static int __init mc13783_adc_probe(struct platform_device *pdev)
 
 out_err_register:
 
-	if (!(priv->mc13783->flags & MC13783_USE_TOUCHSCREEN))
+	if (!mc13783_adc_use_touchscreen(pdev))
 		sysfs_remove_group(&pdev->dev.kobj, &mc13783_group_ts);
 out_err_create2:
 
@@ -199,7 +208,7 @@ static int __devexit mc13783_adc_remove(struct platform_device *pdev)
 
 	hwmon_device_unregister(priv->hwmon_dev);
 
-	if (!(priv->mc13783->flags & MC13783_USE_TOUCHSCREEN))
+	if (!mc13783_adc_use_touchscreen(pdev))
 		sysfs_remove_group(&pdev->dev.kobj, &mc13783_group_ts);
 
 	sysfs_remove_group(&pdev->dev.kobj, &mc13783_group);

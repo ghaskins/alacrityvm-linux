@@ -20,7 +20,6 @@
 #include <linux/smp.h>
 #include <linux/perf_event.h>
 #include <linux/interrupt.h>
-#include <linux/module.h>
 #include <linux/kdebug.h>
 
 #include <asm/system.h>
@@ -135,7 +134,7 @@ asmlinkage int lookup_fault(unsigned long pc, unsigned long ret_pc,
 
 	default:
 		break;
-	};
+	}
 
 	memset(&regs, 0, sizeof (regs));
 	regs.pc = pc;
@@ -240,10 +239,9 @@ asmlinkage void do_sparc_fault(struct pt_regs *regs, int text_fault, int write,
 	 * only copy the information from the master page table,
 	 * nothing more.
 	 */
+	code = SEGV_MAPERR;
 	if (!ARCH_SUN4C && address >= TASK_SIZE)
 		goto vmalloc_fault;
-
-	code = SEGV_MAPERR;
 
 	/*
 	 * If we're in an interrupt or have no user
@@ -252,7 +250,7 @@ asmlinkage void do_sparc_fault(struct pt_regs *regs, int text_fault, int write,
         if (in_atomic() || !mm)
                 goto no_context;
 
-	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, 0, regs, address);
+	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, address);
 
 	down_read(&mm->mmap_sem);
 
@@ -302,12 +300,10 @@ good_area:
 	}
 	if (fault & VM_FAULT_MAJOR) {
 		current->maj_flt++;
-		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1, 0,
-			      regs, address);
+		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1, regs, address);
 	} else {
 		current->min_flt++;
-		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, 0,
-			      regs, address);
+		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, regs, address);
 	}
 	up_read(&mm->mmap_sem);
 	return;
@@ -539,6 +535,12 @@ do_sigbus:
 	__do_fault_siginfo(BUS_ADRERR, SIGBUS, tsk->thread.kregs, address);
 }
 
+static void check_stack_aligned(unsigned long sp)
+{
+	if (sp & 0x7UL)
+		force_sig(SIGILL, current);
+}
+
 void window_overflow_fault(void)
 {
 	unsigned long sp;
@@ -547,6 +549,8 @@ void window_overflow_fault(void)
 	if(((sp + 0x38) & PAGE_MASK) != (sp & PAGE_MASK))
 		force_user_fault(sp + 0x38, 1);
 	force_user_fault(sp, 1);
+
+	check_stack_aligned(sp);
 }
 
 void window_underflow_fault(unsigned long sp)
@@ -554,6 +558,8 @@ void window_underflow_fault(unsigned long sp)
 	if(((sp + 0x38) & PAGE_MASK) != (sp & PAGE_MASK))
 		force_user_fault(sp + 0x38, 0);
 	force_user_fault(sp, 0);
+
+	check_stack_aligned(sp);
 }
 
 void window_ret_fault(struct pt_regs *regs)
@@ -564,4 +570,6 @@ void window_ret_fault(struct pt_regs *regs)
 	if(((sp + 0x38) & PAGE_MASK) != (sp & PAGE_MASK))
 		force_user_fault(sp + 0x38, 0);
 	force_user_fault(sp, 0);
+
+	check_stack_aligned(sp);
 }

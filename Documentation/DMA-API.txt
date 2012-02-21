@@ -50,6 +50,13 @@ specify the GFP_ flags (see kmalloc) for the allocation (the
 implementation may choose to ignore flags that affect the location of
 the returned memory, like GFP_DMA).
 
+void *
+dma_zalloc_coherent(struct device *dev, size_t size,
+			     dma_addr_t *dma_handle, gfp_t flag)
+
+Wraps dma_alloc_coherent() and also zeroes the returned memory if the
+allocation attempt succeeded.
+
 void
 dma_free_coherent(struct device *dev, size_t size, void *cpu_addr,
 			   dma_addr_t dma_handle)
@@ -454,12 +461,6 @@ dma_free_noncoherent(struct device *dev, size_t size, void *cpu_addr,
 Free memory allocated by the nonconsistent API.  All parameters must
 be identical to those passed in (and returned by
 dma_alloc_noncoherent()).
-
-int
-dma_is_consistent(struct device *dev, dma_addr_t dma_handle)
-
-Returns true if the device dev is performing consistent DMA on the memory
-area pointed to by the dma_handle.
 
 int
 dma_get_cache_alignment(void)

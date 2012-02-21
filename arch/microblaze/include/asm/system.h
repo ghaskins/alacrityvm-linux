@@ -12,11 +12,10 @@
 #include <asm/registers.h>
 #include <asm/setup.h>
 #include <asm/irqflags.h>
+#include <asm/cache.h>
 
 #include <asm-generic/cmpxchg.h>
 #include <asm-generic/cmpxchg-local.h>
-
-#define __ARCH_WANT_INTERRUPTS_ON_CTXSW
 
 struct task_struct;
 struct thread_info;
@@ -44,7 +43,6 @@ extern struct task_struct *_switch_to(struct thread_info *prev,
 #define smp_rmb()		rmb()
 #define smp_wmb()		wmb()
 
-void show_trace(struct task_struct *task, unsigned long *stack);
 void __bad_xchg(volatile void *ptr, int size);
 
 static inline unsigned long __xchg(unsigned long x, volatile void *ptr,

@@ -16,7 +16,6 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -28,24 +27,23 @@
 
 #include <asm/mach/map.h>
 
-#include <plat/mux.h>
 #include <plat/sram.h>
 #include <plat/sdrc.h>
-#include <plat/gpmc.h>
 #include <plat/serial.h>
-#include <plat/vram.h>
 
 #include "clock2xxx.h"
 #include "clock3xxx.h"
 #include "clock44xx.h"
 
+#include <plat/common.h>
 #include <plat/omap-pm.h>
-#include <plat/powerdomain.h>
-#include "powerdomains.h"
+#include "voltage.h"
+#include "powerdomain.h"
 
-#include <plat/clockdomain.h>
-#include "clockdomains.h"
+#include "clockdomain.h"
 #include <plat/omap_hwmod.h>
+#include <plat/multi.h>
+#include <plat/common.h>
 
 /*
  * The machine specific code may provide the extra mapping besides the
@@ -68,7 +66,7 @@ static struct map_desc omap24xx_io_desc[] __initdata = {
 	},
 };
 
-#ifdef CONFIG_ARCH_OMAP2420
+#ifdef CONFIG_SOC_OMAP2420
 static struct map_desc omap242x_io_desc[] __initdata = {
 	{
 		.virtual	= DSP_MEM_2420_VIRT,
@@ -92,7 +90,7 @@ static struct map_desc omap242x_io_desc[] __initdata = {
 
 #endif
 
-#ifdef CONFIG_ARCH_OMAP2430
+#ifdef CONFIG_SOC_OMAP2430
 static struct map_desc omap243x_io_desc[] __initdata = {
 	{
 		.virtual	= L4_WK_243X_VIRT,
@@ -166,8 +164,29 @@ static struct map_desc omap34xx_io_desc[] __initdata = {
 		.length		= L4_EMU_34XX_SIZE,
 		.type		= MT_DEVICE
 	},
+#if defined(CONFIG_DEBUG_LL) &&							\
+	(defined(CONFIG_MACH_OMAP_ZOOM2) || defined(CONFIG_MACH_OMAP_ZOOM3))
+	{
+		.virtual	= ZOOM_UART_VIRT,
+		.pfn		= __phys_to_pfn(ZOOM_UART_BASE),
+		.length		= SZ_1M,
+		.type		= MT_DEVICE
+	},
+#endif
 };
 #endif
+
+#ifdef CONFIG_SOC_OMAPTI816X
+static struct map_desc omapti816x_io_desc[] __initdata = {
+	{
+		.virtual	= L4_34XX_VIRT,
+		.pfn		= __phys_to_pfn(L4_34XX_PHYS),
+		.length		= L4_34XX_SIZE,
+		.type		= MT_DEVICE
+	},
+};
+#endif
+
 #ifdef	CONFIG_ARCH_OMAP4
 static struct map_desc omap44xx_io_desc[] __initdata = {
 	{
@@ -221,36 +240,19 @@ static struct map_desc omap44xx_io_desc[] __initdata = {
 };
 #endif
 
-static void __init _omap2_map_common_io(void)
-{
-	/* Normally devicemaps_init() would flush caches and tlb after
-	 * mdesc->map_io(), but we must also do it here because of the CPU
-	 * revision check below.
-	 */
-	local_flush_tlb_all();
-	flush_cache_all();
-
-	omap2_check_revision();
-	omap_sram_init();
-	omapfb_reserve_sdram();
-	omap_vram_reserve_sdram();
-}
-
-#ifdef CONFIG_ARCH_OMAP2420
+#ifdef CONFIG_SOC_OMAP2420
 void __init omap242x_map_common_io(void)
 {
 	iotable_init(omap24xx_io_desc, ARRAY_SIZE(omap24xx_io_desc));
 	iotable_init(omap242x_io_desc, ARRAY_SIZE(omap242x_io_desc));
-	_omap2_map_common_io();
 }
 #endif
 
-#ifdef CONFIG_ARCH_OMAP2430
+#ifdef CONFIG_SOC_OMAP2430
 void __init omap243x_map_common_io(void)
 {
 	iotable_init(omap24xx_io_desc, ARRAY_SIZE(omap24xx_io_desc));
 	iotable_init(omap243x_io_desc, ARRAY_SIZE(omap243x_io_desc));
-	_omap2_map_common_io();
 }
 #endif
 
@@ -258,7 +260,13 @@ void __init omap243x_map_common_io(void)
 void __init omap34xx_map_common_io(void)
 {
 	iotable_init(omap34xx_io_desc, ARRAY_SIZE(omap34xx_io_desc));
-	_omap2_map_common_io();
+}
+#endif
+
+#ifdef CONFIG_SOC_OMAPTI816X
+void __init omapti816x_map_common_io(void)
+{
+	iotable_init(omapti816x_io_desc, ARRAY_SIZE(omapti816x_io_desc));
 }
 #endif
 
@@ -266,7 +274,6 @@ void __init omap34xx_map_common_io(void)
 void __init omap44xx_map_common_io(void)
 {
 	iotable_init(omap44xx_io_desc, ARRAY_SIZE(omap44xx_io_desc));
-	_omap2_map_common_io();
 }
 #endif
 
@@ -290,7 +297,7 @@ static int __init _omap2_init_reprogram_sdrc(void)
 		return 0;
 
 	dpll3_m2_ck = clk_get(NULL, "dpll3_m2_ck");
-	if (!dpll3_m2_ck)
+	if (IS_ERR(dpll3_m2_ck))
 		return -EINVAL;
 
 	rate = clk_get_rate(dpll3_m2_ck);
@@ -304,39 +311,191 @@ static int __init _omap2_init_reprogram_sdrc(void)
 	return v;
 }
 
-void __init omap2_init_common_hw(struct omap_sdrc_params *sdrc_cs0,
-				 struct omap_sdrc_params *sdrc_cs1)
+static int _set_hwmod_postsetup_state(struct omap_hwmod *oh, void *data)
 {
-	pwrdm_init(powerdomains_omap);
-	clkdm_init(clockdomains_omap, clkdm_autodeps);
-	if (cpu_is_omap242x())
-		omap2420_hwmod_init();
-	else if (cpu_is_omap243x())
-		omap2430_hwmod_init();
-	else if (cpu_is_omap34xx())
-		omap3xxx_hwmod_init();
-	omap2_mux_init();
-	/* The OPP tables have to be registered before a clk init */
-	omap_pm_if_early_init(mpu_opps, dsp_opps, l3_opps);
+	return omap_hwmod_set_postsetup_state(oh, *(u8 *)data);
+}
 
-	if (cpu_is_omap2420())
-		omap2420_clk_init();
-	else if (cpu_is_omap2430())
-		omap2430_clk_init();
-	else if (cpu_is_omap34xx())
-		omap3xxx_clk_init();
-	else if (cpu_is_omap44xx())
-		omap4xxx_clk_init();
-	else
-		pr_err("Could not init clock framework - unknown CPU\n");
+/* See irq.c, omap4-common.c and entry-macro.S */
+void __iomem *omap_irq_base;
 
-	omap_serial_early_init();
-	if (cpu_is_omap24xx() || cpu_is_omap34xx())   /* FIXME: OMAP4 */
-		omap_hwmod_late_init();
-	omap_pm_if_init();
-	if (cpu_is_omap24xx() || cpu_is_omap34xx()) {
+static void __init omap_common_init_early(void)
+{
+	omap2_check_revision();
+	omap_ioremap_init();
+	omap_init_consistent_dma_size();
+}
+
+static void __init omap_hwmod_init_postsetup(void)
+{
+	u8 postsetup_state;
+
+	/* Set the default postsetup state for all hwmods */
+#ifdef CONFIG_PM_RUNTIME
+	postsetup_state = _HWMOD_STATE_IDLE;
+#else
+	postsetup_state = _HWMOD_STATE_ENABLED;
+#endif
+	omap_hwmod_for_each(_set_hwmod_postsetup_state, &postsetup_state);
+
+	/*
+	 * Set the default postsetup state for unusual modules (like
+	 * MPU WDT).
+	 *
+	 * The postsetup_state is not actually used until
+	 * omap_hwmod_late_init(), so boards that desire full watchdog
+	 * coverage of kernel initialization can reprogram the
+	 * postsetup_state between the calls to
+	 * omap2_init_common_infra() and omap_sdrc_init().
+	 *
+	 * XXX ideally we could detect whether the MPU WDT was currently
+	 * enabled here and make this conditional
+	 */
+	postsetup_state = _HWMOD_STATE_DISABLED;
+	omap_hwmod_for_each_by_class("wd_timer",
+				     _set_hwmod_postsetup_state,
+				     &postsetup_state);
+
+	omap_pm_if_early_init();
+}
+
+#ifdef CONFIG_ARCH_OMAP2
+void __init omap2420_init_early(void)
+{
+	omap2_set_globals_242x();
+	omap_common_init_early();
+	omap2xxx_voltagedomains_init();
+	omap242x_powerdomains_init();
+	omap242x_clockdomains_init();
+	omap2420_hwmod_init();
+	omap_hwmod_init_postsetup();
+	omap2420_clk_init();
+}
+
+void __init omap2430_init_early(void)
+{
+	omap2_set_globals_243x();
+	omap_common_init_early();
+	omap2xxx_voltagedomains_init();
+	omap243x_powerdomains_init();
+	omap243x_clockdomains_init();
+	omap2430_hwmod_init();
+	omap_hwmod_init_postsetup();
+	omap2430_clk_init();
+}
+#endif
+
+/*
+ * Currently only board-omap3beagle.c should call this because of the
+ * same machine_id for 34xx and 36xx beagle.. Will get fixed with DT.
+ */
+#ifdef CONFIG_ARCH_OMAP3
+void __init omap3_init_early(void)
+{
+	omap2_set_globals_3xxx();
+	omap_common_init_early();
+	omap3xxx_voltagedomains_init();
+	omap3xxx_powerdomains_init();
+	omap3xxx_clockdomains_init();
+	omap3xxx_hwmod_init();
+	omap_hwmod_init_postsetup();
+	omap3xxx_clk_init();
+}
+
+void __init omap3430_init_early(void)
+{
+	omap3_init_early();
+}
+
+void __init omap35xx_init_early(void)
+{
+	omap3_init_early();
+}
+
+void __init omap3630_init_early(void)
+{
+	omap3_init_early();
+}
+
+void __init am35xx_init_early(void)
+{
+	omap3_init_early();
+}
+
+void __init ti816x_init_early(void)
+{
+	omap2_set_globals_ti816x();
+	omap_common_init_early();
+	omap3xxx_voltagedomains_init();
+	omap3xxx_powerdomains_init();
+	omap3xxx_clockdomains_init();
+	omap3xxx_hwmod_init();
+	omap_hwmod_init_postsetup();
+	omap3xxx_clk_init();
+}
+#endif
+
+#ifdef CONFIG_ARCH_OMAP4
+void __init omap4430_init_early(void)
+{
+	omap2_set_globals_443x();
+	omap_common_init_early();
+	omap44xx_voltagedomains_init();
+	omap44xx_powerdomains_init();
+	omap44xx_clockdomains_init();
+	omap44xx_hwmod_init();
+	omap_hwmod_init_postsetup();
+	omap4xxx_clk_init();
+}
+#endif
+
+void __init omap_sdrc_init(struct omap_sdrc_params *sdrc_cs0,
+				      struct omap_sdrc_params *sdrc_cs1)
+{
+	omap_sram_init();
+
+	if (cpu_is_omap24xx() || omap3_has_sdrc()) {
 		omap2_sdrc_init(sdrc_cs0, sdrc_cs1);
 		_omap2_init_reprogram_sdrc();
 	}
-	gpmc_init();
 }
+
+/*
+ * NOTE: Please use ioremap + __raw_read/write where possible instead of these
+ */
+
+u8 omap_readb(u32 pa)
+{
+	return __raw_readb(OMAP2_L4_IO_ADDRESS(pa));
+}
+EXPORT_SYMBOL(omap_readb);
+
+u16 omap_readw(u32 pa)
+{
+	return __raw_readw(OMAP2_L4_IO_ADDRESS(pa));
+}
+EXPORT_SYMBOL(omap_readw);
+
+u32 omap_readl(u32 pa)
+{
+	return __raw_readl(OMAP2_L4_IO_ADDRESS(pa));
+}
+EXPORT_SYMBOL(omap_readl);
+
+void omap_writeb(u8 v, u32 pa)
+{
+	__raw_writeb(v, OMAP2_L4_IO_ADDRESS(pa));
+}
+EXPORT_SYMBOL(omap_writeb);
+
+void omap_writew(u16 v, u32 pa)
+{
+	__raw_writew(v, OMAP2_L4_IO_ADDRESS(pa));
+}
+EXPORT_SYMBOL(omap_writew);
+
+void omap_writel(u32 v, u32 pa)
+{
+	__raw_writel(v, OMAP2_L4_IO_ADDRESS(pa));
+}
+EXPORT_SYMBOL(omap_writel);

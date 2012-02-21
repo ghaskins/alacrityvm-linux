@@ -40,8 +40,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <socketcan-users@lists.berlios.de>
- *
  */
 
 #include <linux/module.h>
@@ -60,7 +58,6 @@
 #include <linux/skbuff.h>
 #include <linux/delay.h>
 
-#include <linux/can.h>
 #include <linux/can/dev.h>
 #include <linux/can/error.h>
 
@@ -307,8 +304,6 @@ static netdev_tx_t sja1000_start_xmit(struct sk_buff *skb,
 	for (i = 0; i < dlc; i++)
 		priv->write_reg(priv, dreg++, cf->data[i]);
 
-	dev->trans_start = jiffies;
-
 	can_put_echo_skb(skb, dev, 0);
 
 	sja1000_write_cmdreg(priv, CMD_TR);
@@ -349,10 +344,10 @@ static void sja1000_rx(struct net_device *dev)
 		    | (priv->read_reg(priv, REG_ID2) >> 5);
 	}
 
+	cf->can_dlc = get_can_dlc(fi & 0x0F);
 	if (fi & FI_RTR) {
 		id |= CAN_RTR_FLAG;
 	} else {
-		cf->can_dlc = get_can_dlc(fi & 0x0F);
 		for (i = 0; i < cf->can_dlc; i++)
 			cf->data[i] = priv->read_reg(priv, dreg++);
 	}
@@ -428,7 +423,7 @@ static int sja1000_err(struct net_device *dev, uint8_t isrc, uint8_t status)
 			cf->data[3] = ecc & ECC_SEG;
 			break;
 		}
-		/* Error occured during transmission? */
+		/* Error occurred during transmission? */
 		if ((ecc & ECC_DIR) == 0)
 			cf->data[2] |= CAN_ERR_PROT_TX;
 	}
@@ -601,6 +596,8 @@ struct net_device *alloc_sja1000dev(int sizeof_priv)
 	priv->can.do_get_berr_counter = sja1000_get_berr_counter;
 	priv->can.ctrlmode_supported = CAN_CTRLMODE_3_SAMPLES |
 		CAN_CTRLMODE_BERR_REPORTING;
+
+	spin_lock_init(&priv->cmdreg_lock);
 
 	if (sizeof_priv)
 		priv->priv = (void *)priv + sizeof(struct sja1000_priv);

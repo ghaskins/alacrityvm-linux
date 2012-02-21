@@ -40,34 +40,9 @@ struct nilfs_write_info {
 	sector_t		blocknr;
 };
 
-
 static int nilfs_segbuf_write(struct nilfs_segment_buffer *segbuf,
 			      struct the_nilfs *nilfs);
 static int nilfs_segbuf_wait(struct nilfs_segment_buffer *segbuf);
-
-
-static struct kmem_cache *nilfs_segbuf_cachep;
-
-static void nilfs_segbuf_init_once(void *obj)
-{
-	memset(obj, 0, sizeof(struct nilfs_segment_buffer));
-}
-
-int __init nilfs_init_segbuf_cache(void)
-{
-	nilfs_segbuf_cachep =
-		kmem_cache_create("nilfs2_segbuf_cache",
-				  sizeof(struct nilfs_segment_buffer),
-				  0, SLAB_RECLAIM_ACCOUNT,
-				  nilfs_segbuf_init_once);
-
-	return (nilfs_segbuf_cachep == NULL) ? -ENOMEM : 0;
-}
-
-void nilfs_destroy_segbuf_cache(void)
-{
-	kmem_cache_destroy(nilfs_segbuf_cachep);
-}
 
 struct nilfs_segment_buffer *nilfs_segbuf_new(struct super_block *sb)
 {
@@ -81,6 +56,7 @@ struct nilfs_segment_buffer *nilfs_segbuf_new(struct super_block *sb)
 	INIT_LIST_HEAD(&segbuf->sb_list);
 	INIT_LIST_HEAD(&segbuf->sb_segsum_buffers);
 	INIT_LIST_HEAD(&segbuf->sb_payload_buffers);
+	segbuf->sb_super_root = NULL;
 
 	init_completion(&segbuf->sb_bio_event);
 	atomic_set(&segbuf->sb_err, 0);
@@ -158,7 +134,7 @@ int nilfs_segbuf_extend_payload(struct nilfs_segment_buffer *segbuf,
 }
 
 int nilfs_segbuf_reset(struct nilfs_segment_buffer *segbuf, unsigned flags,
-		       time_t ctime)
+		       time_t ctime, __u64 cno)
 {
 	int err;
 
@@ -171,6 +147,7 @@ int nilfs_segbuf_reset(struct nilfs_segment_buffer *segbuf, unsigned flags,
 	segbuf->sb_sum.sumbytes = sizeof(struct nilfs_segment_summary);
 	segbuf->sb_sum.nfinfo = segbuf->sb_sum.nfileblk = 0;
 	segbuf->sb_sum.ctime = ctime;
+	segbuf->sb_sum.cno = cno;
 	return 0;
 }
 
@@ -196,13 +173,14 @@ void nilfs_segbuf_fill_in_segsum(struct nilfs_segment_buffer *segbuf)
 	raw_sum->ss_nfinfo   = cpu_to_le32(segbuf->sb_sum.nfinfo);
 	raw_sum->ss_sumbytes = cpu_to_le32(segbuf->sb_sum.sumbytes);
 	raw_sum->ss_pad      = 0;
+	raw_sum->ss_cno      = cpu_to_le64(segbuf->sb_sum.cno);
 }
 
 /*
  * CRC calculation routines
  */
-void nilfs_segbuf_fill_in_segsum_crc(struct nilfs_segment_buffer *segbuf,
-				     u32 seed)
+static void
+nilfs_segbuf_fill_in_segsum_crc(struct nilfs_segment_buffer *segbuf, u32 seed)
 {
 	struct buffer_head *bh;
 	struct nilfs_segment_summary *raw_sum;
@@ -229,8 +207,8 @@ void nilfs_segbuf_fill_in_segsum_crc(struct nilfs_segment_buffer *segbuf,
 	raw_sum->ss_sumsum = cpu_to_le32(crc);
 }
 
-void nilfs_segbuf_fill_in_data_crc(struct nilfs_segment_buffer *segbuf,
-				   u32 seed)
+static void nilfs_segbuf_fill_in_data_crc(struct nilfs_segment_buffer *segbuf,
+					  u32 seed)
 {
 	struct buffer_head *bh;
 	struct nilfs_segment_summary *raw_sum;
@@ -256,24 +234,29 @@ void nilfs_segbuf_fill_in_data_crc(struct nilfs_segment_buffer *segbuf,
 	raw_sum->ss_datasum = cpu_to_le32(crc);
 }
 
+static void
+nilfs_segbuf_fill_in_super_root_crc(struct nilfs_segment_buffer *segbuf,
+				    u32 seed)
+{
+	struct nilfs_super_root *raw_sr;
+	struct the_nilfs *nilfs = segbuf->sb_super->s_fs_info;
+	unsigned srsize;
+	u32 crc;
+
+	raw_sr = (struct nilfs_super_root *)segbuf->sb_super_root->b_data;
+	srsize = NILFS_SR_BYTES(nilfs->ns_inode_size);
+	crc = crc32_le(seed,
+		       (unsigned char *)raw_sr + sizeof(raw_sr->sr_sum),
+		       srsize - sizeof(raw_sr->sr_sum));
+	raw_sr->sr_sum = cpu_to_le32(crc);
+}
+
 static void nilfs_release_buffers(struct list_head *list)
 {
 	struct buffer_head *bh, *n;
 
 	list_for_each_entry_safe(bh, n, list, b_assoc_buffers) {
 		list_del_init(&bh->b_assoc_buffers);
-		if (buffer_nilfs_allocated(bh)) {
-			struct page *clone_page = bh->b_page;
-
-			/* remove clone page */
-			brelse(bh);
-			page_cache_release(clone_page); /* for each bh */
-			if (page_count(clone_page) <= 2) {
-				lock_page(clone_page);
-				nilfs_free_private_page(clone_page);
-			}
-			continue;
-		}
 		brelse(bh);
 	}
 }
@@ -282,6 +265,7 @@ static void nilfs_segbuf_clear(struct nilfs_segment_buffer *segbuf)
 {
 	nilfs_release_buffers(&segbuf->sb_segsum_buffers);
 	nilfs_release_buffers(&segbuf->sb_payload_buffers);
+	segbuf->sb_super_root = NULL;
 }
 
 /*
@@ -334,6 +318,23 @@ int nilfs_wait_on_logs(struct list_head *logs)
 	return ret;
 }
 
+/**
+ * nilfs_add_checksums_on_logs - add checksums on the logs
+ * @logs: list of segment buffers storing target logs
+ * @seed: checksum seed value
+ */
+void nilfs_add_checksums_on_logs(struct list_head *logs, u32 seed)
+{
+	struct nilfs_segment_buffer *segbuf;
+
+	list_for_each_entry(segbuf, logs, sb_list) {
+		if (segbuf->sb_super_root)
+			nilfs_segbuf_fill_in_super_root_crc(segbuf, seed);
+		nilfs_segbuf_fill_in_segsum_crc(segbuf, seed);
+		nilfs_segbuf_fill_in_data_crc(segbuf, seed);
+	}
+}
+
 /*
  * BIO operations
  */
@@ -361,7 +362,8 @@ static int nilfs_segbuf_submit_bio(struct nilfs_segment_buffer *segbuf,
 	struct bio *bio = wi->bio;
 	int err;
 
-	if (segbuf->sb_nbio > 0 && bdi_write_congested(wi->nilfs->ns_bdi)) {
+	if (segbuf->sb_nbio > 0 &&
+	    bdi_write_congested(segbuf->sb_super->s_bdi)) {
 		wait_for_completion(&segbuf->sb_bio_event);
 		segbuf->sb_nbio--;
 		if (unlikely(atomic_read(&segbuf->sb_err))) {
@@ -498,7 +500,7 @@ static int nilfs_segbuf_write(struct nilfs_segment_buffer *segbuf,
 		 * Last BIO is always sent through the following
 		 * submission.
 		 */
-		rw |= (1 << BIO_RW_SYNCIO) | (1 << BIO_RW_UNPLUG);
+		rw |= REQ_SYNC;
 		res = nilfs_segbuf_submit_bio(segbuf, &wi, rw);
 	}
 

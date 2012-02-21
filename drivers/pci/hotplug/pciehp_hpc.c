@@ -41,8 +41,6 @@
 #include "../pci.h"
 #include "pciehp.h"
 
-static atomic_t pciehp_num_controllers = ATOMIC_INIT(0);
-
 static inline int pciehp_readw(struct controller *ctrl, int reg, u16 *value)
 {
 	struct pci_dev *dev = ctrl->pcie->port;
@@ -277,17 +275,18 @@ int pciehp_check_link_status(struct controller *ctrl)
          * hot-plug capable downstream port. But old controller might
          * not implement it. In this case, we wait for 1000 ms.
          */
-        if (ctrl->link_active_reporting){
-                /* Wait for Data Link Layer Link Active bit to be set */
+        if (ctrl->link_active_reporting)
                 pcie_wait_link_active(ctrl);
-                /*
-                 * We must wait for 100 ms after the Data Link Layer
-                 * Link Active bit reads 1b before initiating a
-                 * configuration access to the hot added device.
-                 */
-                msleep(100);
-        } else
+        else
                 msleep(1000);
+
+	/*
+	 * Need to wait for 1000 ms after Data Link Layer Link Active
+	 * (DLLLA) bit reads 1b before sending configuration request.
+	 * We need it before checking Link Training (LT) bit becuase
+	 * LT is still set even after DLLLA bit is set on some platform.
+	 */
+	msleep(1000);
 
 	retval = pciehp_readw(ctrl, PCI_EXP_LNKSTA, &lnk_status);
 	if (retval) {
@@ -302,6 +301,16 @@ int pciehp_check_link_status(struct controller *ctrl)
 		retval = -1;
 		return retval;
 	}
+
+	/*
+	 * If the port supports Link speeds greater than 5.0 GT/s, we
+	 * must wait for 100 ms after Link training completes before
+	 * sending configuration request.
+	 */
+	if (ctrl->pcie->port->subordinate->max_bus_speed > PCIE_SPEED_5_0GT)
+		msleep(100);
+
+	pcie_update_link_speed(ctrl->pcie->port->subordinate, lnk_status);
 
 	return retval;
 }
@@ -493,7 +502,6 @@ int pciehp_power_on_slot(struct slot * slot)
 	u16 slot_cmd;
 	u16 cmd_mask;
 	u16 slot_status;
-	u16 lnk_status;
 	int retval = 0;
 
 	/* Clear sticky power-fault bit from previous power failures */
@@ -524,14 +532,6 @@ int pciehp_power_on_slot(struct slot * slot)
 	}
 	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n", __func__,
 		 pci_pcie_cap(ctrl->pcie->port) + PCI_EXP_SLTCTL, slot_cmd);
-
-	retval = pciehp_readw(ctrl, PCI_EXP_LNKSTA, &lnk_status);
-	if (retval) {
-		ctrl_err(ctrl, "%s: Cannot read LNKSTA register\n",
-				__func__);
-		return retval;
-	}
-	pcie_update_link_speed(ctrl->pcie->port->subordinate, lnk_status);
 
 	return retval;
 }
@@ -805,8 +805,8 @@ static void pcie_cleanup_slot(struct controller *ctrl)
 {
 	struct slot *slot = ctrl->slot;
 	cancel_delayed_work(&slot->work);
-	flush_scheduled_work();
 	flush_workqueue(pciehp_wq);
+	flush_workqueue(pciehp_ordered_wq);
 	kfree(slot);
 }
 
@@ -912,16 +912,6 @@ struct controller *pcie_init(struct pcie_device *dev)
 	/* Disable sotfware notification */
 	pcie_disable_notification(ctrl);
 
-	/*
-	 * If this is the first controller to be initialized,
-	 * initialize the pciehp work queue
-	 */
-	if (atomic_add_return(1, &pciehp_num_controllers) == 1) {
-		pciehp_wq = create_singlethread_workqueue("pciehpd");
-		if (!pciehp_wq)
-			goto abort_ctrl;
-	}
-
 	ctrl_info(ctrl, "HPC vendor_id %x device_id %x ss_vid %x ss_did %x\n",
 		  pdev->vendor, pdev->device, pdev->subsystem_vendor,
 		  pdev->subsystem_device);
@@ -941,11 +931,5 @@ void pciehp_release_ctrl(struct controller *ctrl)
 {
 	pcie_shutdown_notification(ctrl);
 	pcie_cleanup_slot(ctrl);
-	/*
-	 * If this is the last controller to be released, destroy the
-	 * pciehp work queue
-	 */
-	if (atomic_dec_and_test(&pciehp_num_controllers))
-		destroy_workqueue(pciehp_wq);
 	kfree(ctrl);
 }

@@ -36,6 +36,7 @@
 #include <linux/spinlock.h>
 #include <linux/mutex.h>
 #include <linux/serial.h>
+#include <linux/kfifo.h>
 #include <linux/ioctl.h>
 #include <linux/firmware.h>
 #include <linux/uaccess.h>
@@ -55,10 +56,6 @@
 
 #define EPROM_PAGE_SIZE		64
 
-
-struct edgeport_uart_buf_desc {
-	__u32 count;		/* Number of bytes currently in buffer */
-};
 
 /* different hardware types */
 #define HARDWARE_TYPE_930	0
@@ -87,14 +84,6 @@ struct product_info {
 	__u8	hardware_type;		/* Type of hardware */
 } __attribute__((packed));
 
-/* circular buffer */
-struct edge_buf {
-	unsigned int	buf_size;
-	char		*buf_buf;
-	char		*buf_get;
-	char		*buf_put;
-};
-
 struct edgeport_port {
 	__u16 uart_base;
 	__u16 dma_address;
@@ -108,7 +97,6 @@ struct edgeport_port {
 	int baud_rate;
 	int close_pending;
 	int lsr_event;
-	struct edgeport_uart_buf_desc tx;
 	struct async_icount	icount;
 	wait_queue_head_t	delta_msr_wait;	/* for handling sleeping while
 						   waiting for msr change to
@@ -119,7 +107,7 @@ struct edgeport_port {
 	spinlock_t ep_lock;
 	int ep_read_urb_state;
 	int ep_write_urb_in_use;
-	struct edge_buf *ep_out_buf;
+	struct kfifo write_fifo;
 };
 
 struct edgeport_serial {
@@ -248,17 +236,6 @@ static void edge_send(struct tty_struct *tty);
 /* sysfs attributes */
 static int edge_create_sysfs_attrs(struct usb_serial_port *port);
 static int edge_remove_sysfs_attrs(struct usb_serial_port *port);
-
-/* circular buffer */
-static struct edge_buf *edge_buf_alloc(unsigned int size);
-static void edge_buf_free(struct edge_buf *eb);
-static void edge_buf_clear(struct edge_buf *eb);
-static unsigned int edge_buf_data_avail(struct edge_buf *eb);
-static unsigned int edge_buf_space_avail(struct edge_buf *eb);
-static unsigned int edge_buf_put(struct edge_buf *eb, const char *buf,
-	unsigned int count);
-static unsigned int edge_buf_get(struct edge_buf *eb, char *buf,
-	unsigned int count);
 
 
 static int ti_vread_sync(struct usb_device *dev, __u8 request,
@@ -456,7 +433,7 @@ static int write_i2c_mem(struct edgeport_serial *serial,
 
 	/* We can only send a maximum of 1 aligned byte page at a time */
 
-	/* calulate the number of bytes left in the first page */
+	/* calculate the number of bytes left in the first page */
 	write_length = EPROM_PAGE_SIZE -
 				(start_address & (EPROM_PAGE_SIZE - 1));
 
@@ -590,7 +567,7 @@ static void chase_port(struct edgeport_port *port, unsigned long timeout,
 	add_wait_queue(&tty->write_wait, &wait);
 	for (;;) {
 		set_current_state(TASK_INTERRUPTIBLE);
-		if (edge_buf_data_avail(port->ep_out_buf) == 0
+		if (kfifo_len(&port->write_fifo) == 0
 		|| timeout == 0 || signal_pending(current)
 		|| !usb_get_intfdata(port->port->serial->interface))
 			/* disconnect */
@@ -602,7 +579,7 @@ static void chase_port(struct edgeport_port *port, unsigned long timeout,
 	set_current_state(TASK_RUNNING);
 	remove_wait_queue(&tty->write_wait, &wait);
 	if (flush)
-		edge_buf_clear(port->ep_out_buf);
+		kfifo_reset_out(&port->write_fifo);
 	spin_unlock_irqrestore(&port->ep_lock, flags);
 	tty_kref_put(tty);
 
@@ -1174,7 +1151,7 @@ static int download_fw(struct edgeport_serial *serial)
 
 			/* Check if we have an old version in the I2C and
 			   update if necessary */
-			if (download_cur_ver != download_new_ver) {
+			if (download_cur_ver < download_new_ver) {
 				dbg("%s - Update I2C dld from %d.%d to %d.%d",
 				    __func__,
 				    firmware_version->Ver_Major,
@@ -1307,7 +1284,7 @@ static int download_fw(struct edgeport_serial *serial)
 				kfree(header);
 				kfree(rom_desc);
 				kfree(ti_manuf_desc);
-				return status;
+				return -EINVAL;
 			}
 
 			/* Update I2C with type 0xf2 record with correct
@@ -1321,7 +1298,7 @@ static int download_fw(struct edgeport_serial *serial)
 				kfree(header);
 				kfree(rom_desc);
 				kfree(ti_manuf_desc);
-				return status;
+				return -EINVAL;
 			}
 
 			/* verify the write -- must do this in order for
@@ -1344,7 +1321,7 @@ static int download_fw(struct edgeport_serial *serial)
 				kfree(header);
 				kfree(rom_desc);
 				kfree(ti_manuf_desc);
-				return status;
+				return -EINVAL;
 			}
 
 			kfree(vheader);
@@ -1594,8 +1571,6 @@ static void handle_new_msr(struct edgeport_port *edge_port, __u8 msr)
 		}
 	}
 	tty_kref_put(tty);
-
-	return;
 }
 
 static void handle_new_lsr(struct edgeport_port *edge_port, int lsr_data,
@@ -2089,7 +2064,6 @@ static int edge_write(struct tty_struct *tty, struct usb_serial_port *port,
 				const unsigned char *data, int count)
 {
 	struct edgeport_port *edge_port = usb_get_serial_port_data(port);
-	unsigned long flags;
 
 	dbg("%s - port %d", __func__, port->number);
 
@@ -2103,10 +2077,8 @@ static int edge_write(struct tty_struct *tty, struct usb_serial_port *port,
 	if (edge_port->close_pending == 1)
 		return -ENODEV;
 
-	spin_lock_irqsave(&edge_port->ep_lock, flags);
-	count = edge_buf_put(edge_port->ep_out_buf, data, count);
-	spin_unlock_irqrestore(&edge_port->ep_lock, flags);
-
+	count = kfifo_in_locked(&edge_port->write_fifo, data, count,
+							&edge_port->ep_lock);
 	edge_send(tty);
 
 	return count;
@@ -2129,7 +2101,7 @@ static void edge_send(struct tty_struct *tty)
 		return;
 	}
 
-	count = edge_buf_get(edge_port->ep_out_buf,
+	count = kfifo_out(&edge_port->write_fifo,
 				port->write_urb->transfer_buffer,
 				port->bulk_out_size);
 
@@ -2185,7 +2157,7 @@ static int edge_write_room(struct tty_struct *tty)
 		return 0;
 
 	spin_lock_irqsave(&edge_port->ep_lock, flags);
-	room = edge_buf_space_avail(edge_port->ep_out_buf);
+	room = kfifo_avail(&edge_port->write_fifo);
 	spin_unlock_irqrestore(&edge_port->ep_lock, flags);
 
 	dbg("%s - returns %d", __func__, room);
@@ -2207,7 +2179,7 @@ static int edge_chars_in_buffer(struct tty_struct *tty)
 		return 0;
 
 	spin_lock_irqsave(&edge_port->ep_lock, flags);
-	chars = edge_buf_data_avail(edge_port->ep_out_buf);
+	chars = kfifo_len(&edge_port->write_fifo);
 	spin_unlock_irqrestore(&edge_port->ep_lock, flags);
 
 	dbg("%s - returns %d", __func__, chars);
@@ -2450,7 +2422,6 @@ static void change_port_settings(struct tty_struct *tty,
 		dbg("%s - error %d when trying to write config to device",
 		     __func__, status);
 	kfree(config);
-	return;
 }
 
 static void edge_set_termios(struct tty_struct *tty,
@@ -2471,10 +2442,9 @@ static void edge_set_termios(struct tty_struct *tty,
 		return;
 	/* change the port settings to the new ones specified */
 	change_port_settings(tty, edge_port, old_termios);
-	return;
 }
 
-static int edge_tiocmset(struct tty_struct *tty, struct file *file,
+static int edge_tiocmset(struct tty_struct *tty,
 					unsigned int set, unsigned int clear)
 {
 	struct usb_serial_port *port = tty->driver_data;
@@ -2507,7 +2477,7 @@ static int edge_tiocmset(struct tty_struct *tty, struct file *file,
 	return 0;
 }
 
-static int edge_tiocmget(struct tty_struct *tty, struct file *file)
+static int edge_tiocmget(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct edgeport_port *edge_port = usb_get_serial_port_data(port);
@@ -2536,6 +2506,27 @@ static int edge_tiocmget(struct tty_struct *tty, struct file *file)
 	return result;
 }
 
+static int edge_get_icount(struct tty_struct *tty,
+				struct serial_icounter_struct *icount)
+{
+	struct usb_serial_port *port = tty->driver_data;
+	struct edgeport_port *edge_port = usb_get_serial_port_data(port);
+	struct async_icount *ic = &edge_port->icount;
+
+	icount->cts = ic->cts;
+	icount->dsr = ic->dsr;
+	icount->rng = ic->rng;
+	icount->dcd = ic->dcd;
+	icount->tx = ic->tx;
+        icount->rx = ic->rx;
+        icount->frame = ic->frame;
+        icount->parity = ic->parity;
+        icount->overrun = ic->overrun;
+        icount->brk = ic->brk;
+        icount->buf_overrun = ic->buf_overrun;
+	return 0;
+}
+
 static int get_serial_info(struct edgeport_port *edge_port,
 				struct serial_struct __user *retinfo)
 {
@@ -2561,7 +2552,7 @@ static int get_serial_info(struct edgeport_port *edge_port,
 	return 0;
 }
 
-static int edge_ioctl(struct tty_struct *tty, struct file *file,
+static int edge_ioctl(struct tty_struct *tty,
 					unsigned int cmd, unsigned long arg)
 {
 	struct usb_serial_port *port = tty->driver_data;
@@ -2598,13 +2589,6 @@ static int edge_ioctl(struct tty_struct *tty, struct file *file,
 		}
 		/* not reached */
 		break;
-	case TIOCGICOUNT:
-		dbg("%s - (%d) TIOCGICOUNT RX=%d, TX=%d", __func__,
-		     port->number, edge_port->icount.rx, edge_port->icount.tx);
-		if (copy_to_user((void __user *)arg, &edge_port->icount,
-				sizeof(edge_port->icount)))
-			return -EFAULT;
-		return 0;
 	}
 	return -ENOIOCTLCMD;
 }
@@ -2664,8 +2648,8 @@ static int edge_startup(struct usb_serial *serial)
 			goto cleanup;
 		}
 		spin_lock_init(&edge_port->ep_lock);
-		edge_port->ep_out_buf = edge_buf_alloc(EDGE_OUT_BUF_SIZE);
-		if (edge_port->ep_out_buf == NULL) {
+		if (kfifo_alloc(&edge_port->write_fifo, EDGE_OUT_BUF_SIZE,
+								GFP_KERNEL)) {
 			dev_err(&serial->dev->dev, "%s - Out of memory\n",
 								__func__);
 			kfree(edge_port);
@@ -2682,7 +2666,7 @@ static int edge_startup(struct usb_serial *serial)
 cleanup:
 	for (--i; i >= 0; --i) {
 		edge_port = usb_get_serial_port_data(serial->port[i]);
-		edge_buf_free(edge_port->ep_out_buf);
+		kfifo_free(&edge_port->write_fifo);
 		kfree(edge_port);
 		usb_set_serial_port_data(serial->port[i], NULL);
 	}
@@ -2713,7 +2697,7 @@ static void edge_release(struct usb_serial *serial)
 
 	for (i = 0; i < serial->num_ports; ++i) {
 		edge_port = usb_get_serial_port_data(serial->port[i]);
-		edge_buf_free(edge_port->ep_out_buf);
+		kfifo_free(&edge_port->write_fifo);
 		kfree(edge_port);
 	}
 	kfree(usb_get_serial_data(serial));
@@ -2763,182 +2747,6 @@ static int edge_remove_sysfs_attrs(struct usb_serial_port *port)
 }
 
 
-/* Circular Buffer */
-
-/*
- * edge_buf_alloc
- *
- * Allocate a circular buffer and all associated memory.
- */
-
-static struct edge_buf *edge_buf_alloc(unsigned int size)
-{
-	struct edge_buf *eb;
-
-
-	if (size == 0)
-		return NULL;
-
-	eb = kmalloc(sizeof(struct edge_buf), GFP_KERNEL);
-	if (eb == NULL)
-		return NULL;
-
-	eb->buf_buf = kmalloc(size, GFP_KERNEL);
-	if (eb->buf_buf == NULL) {
-		kfree(eb);
-		return NULL;
-	}
-
-	eb->buf_size = size;
-	eb->buf_get = eb->buf_put = eb->buf_buf;
-
-	return eb;
-}
-
-
-/*
- * edge_buf_free
- *
- * Free the buffer and all associated memory.
- */
-
-static void edge_buf_free(struct edge_buf *eb)
-{
-	if (eb) {
-		kfree(eb->buf_buf);
-		kfree(eb);
-	}
-}
-
-
-/*
- * edge_buf_clear
- *
- * Clear out all data in the circular buffer.
- */
-
-static void edge_buf_clear(struct edge_buf *eb)
-{
-	if (eb != NULL)
-		eb->buf_get = eb->buf_put;
-	/* equivalent to a get of all data available */
-}
-
-
-/*
- * edge_buf_data_avail
- *
- * Return the number of bytes of data available in the circular
- * buffer.
- */
-
-static unsigned int edge_buf_data_avail(struct edge_buf *eb)
-{
-	if (eb == NULL)
-		return 0;
-	return ((eb->buf_size + eb->buf_put - eb->buf_get) % eb->buf_size);
-}
-
-
-/*
- * edge_buf_space_avail
- *
- * Return the number of bytes of space available in the circular
- * buffer.
- */
-
-static unsigned int edge_buf_space_avail(struct edge_buf *eb)
-{
-	if (eb == NULL)
-		return 0;
-	return ((eb->buf_size + eb->buf_get - eb->buf_put - 1) % eb->buf_size);
-}
-
-
-/*
- * edge_buf_put
- *
- * Copy data data from a user buffer and put it into the circular buffer.
- * Restrict to the amount of space available.
- *
- * Return the number of bytes copied.
- */
-
-static unsigned int edge_buf_put(struct edge_buf *eb, const char *buf,
-	unsigned int count)
-{
-	unsigned int len;
-
-
-	if (eb == NULL)
-		return 0;
-
-	len  = edge_buf_space_avail(eb);
-	if (count > len)
-		count = len;
-
-	if (count == 0)
-		return 0;
-
-	len = eb->buf_buf + eb->buf_size - eb->buf_put;
-	if (count > len) {
-		memcpy(eb->buf_put, buf, len);
-		memcpy(eb->buf_buf, buf+len, count - len);
-		eb->buf_put = eb->buf_buf + count - len;
-	} else {
-		memcpy(eb->buf_put, buf, count);
-		if (count < len)
-			eb->buf_put += count;
-		else /* count == len */
-			eb->buf_put = eb->buf_buf;
-	}
-
-	return count;
-}
-
-
-/*
- * edge_buf_get
- *
- * Get data from the circular buffer and copy to the given buffer.
- * Restrict to the amount of data available.
- *
- * Return the number of bytes copied.
- */
-
-static unsigned int edge_buf_get(struct edge_buf *eb, char *buf,
-	unsigned int count)
-{
-	unsigned int len;
-
-
-	if (eb == NULL)
-		return 0;
-
-	len = edge_buf_data_avail(eb);
-	if (count > len)
-		count = len;
-
-	if (count == 0)
-		return 0;
-
-	len = eb->buf_buf + eb->buf_size - eb->buf_get;
-	if (count > len) {
-		memcpy(buf, eb->buf_get, len);
-		memcpy(buf+len, eb->buf_buf, count - len);
-		eb->buf_get = eb->buf_buf + count - len;
-	} else {
-		memcpy(buf, eb->buf_get, count);
-		if (count < len)
-			eb->buf_get += count;
-		else /* count == len */
-			eb->buf_get = eb->buf_buf;
-	}
-
-	return count;
-}
-
-
 static struct usb_serial_driver edgeport_1port_device = {
 	.driver = {
 		.owner		= THIS_MODULE,
@@ -2960,6 +2768,7 @@ static struct usb_serial_driver edgeport_1port_device = {
 	.set_termios		= edge_set_termios,
 	.tiocmget		= edge_tiocmget,
 	.tiocmset		= edge_tiocmset,
+	.get_icount		= edge_get_icount,
 	.write			= edge_write,
 	.write_room		= edge_write_room,
 	.chars_in_buffer	= edge_chars_in_buffer,

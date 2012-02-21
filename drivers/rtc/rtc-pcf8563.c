@@ -18,6 +18,7 @@
 #include <linux/bcd.h>
 #include <linux/rtc.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 
 #define DRV_VERSION "0.4.3"
 
@@ -171,14 +172,6 @@ static int pcf8563_set_datetime(struct i2c_client *client, struct rtc_time *tm)
 
 	return 0;
 }
-
-struct pcf8563_limit
-{
-	unsigned char reg;
-	unsigned char mask;
-	unsigned char min;
-	unsigned char max;
-};
 
 static int pcf8563_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {

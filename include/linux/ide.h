@@ -18,13 +18,13 @@
 #include <linux/pci.h>
 #include <linux/completion.h>
 #include <linux/pm.h>
+#include <linux/mutex.h>
 #ifdef CONFIG_BLK_DEV_IDEACPI
 #include <acpi/acpi.h>
 #endif
 #include <asm/byteorder.h>
 #include <asm/system.h>
 #include <asm/io.h>
-#include <asm/mutex.h>
 
 /* for request_sense */
 #include <linux/cdrom.h>
@@ -362,7 +362,7 @@ struct ide_drive_s;
 struct ide_disk_ops {
 	int		(*check)(struct ide_drive_s *, const char *);
 	int		(*get_capacity)(struct ide_drive_s *);
-	u64		(*set_capacity)(struct ide_drive_s *, u64);
+	void		(*unlock_native_capacity)(struct ide_drive_s *);
 	void		(*setup)(struct ide_drive_s *);
 	void		(*flush)(struct ide_drive_s *);
 	int		(*init_media)(struct ide_drive_s *, struct gendisk *);
@@ -458,7 +458,7 @@ enum {
 	IDE_DFLAG_DOORLOCKING		= (1 << 15),
 	/* disallow DMA */
 	IDE_DFLAG_NODMA			= (1 << 16),
-	/* powermanagment told us not to do anything, so sleep nicely */
+	/* powermanagement told us not to do anything, so sleep nicely */
 	IDE_DFLAG_BLOCKED		= (1 << 17),
 	/* sleeping & sleep field valid */
 	IDE_DFLAG_SLEEPING		= (1 << 18),
@@ -516,8 +516,8 @@ struct ide_drive_s {
         u8	current_speed;	/* current transfer rate set */
 	u8	desired_speed;	/* desired transfer rate set */
 	u8	pio_mode;	/* for ->set_pio_mode _only_ */
-	u8	dma_mode;	/* for ->dma_pio_mode _only_ */
-        u8	dn;		/* now wide spread use */
+	u8	dma_mode;	/* for ->set_dma_mode _only_ */
+	u8	dn;		/* now wide spread use */
 	u8	acoustic;	/* acoustic management */
 	u8	media;		/* disk, cdrom, tape, floppy, ... */
 	u8	ready_stat;	/* min status value for drive ready */

@@ -26,6 +26,7 @@
 
 #include <linux/workqueue.h>
 #include <linux/sysdev.h>
+#include <linux/mutex.h>
 
 #define LS_SIZE (256 * 1024)
 #define LS_ADDR_MASK (LS_SIZE - 1)
@@ -202,14 +203,6 @@ void spu_irq_setaffinity(struct spu *spu, int cpu);
 
 void spu_setup_kernel_slbs(struct spu *spu, struct spu_lscsa *lscsa,
 		void *code, int code_size);
-
-#ifdef CONFIG_KEXEC
-void crash_register_spus(struct list_head *list);
-#else
-static inline void crash_register_spus(struct list_head *list)
-{
-}
-#endif
 
 extern void spu_invalidate_slbs(struct spu *spu);
 extern void spu_associate_mm(struct spu *spu, struct mm_struct *mm);

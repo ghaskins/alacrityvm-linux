@@ -1,10 +1,11 @@
 /*
- * Copyright 2009 Novell.  All Rights Reserved.
+ * Copyright 2009 Novell, Gregory Haskins.  All Rights Reserved.
+ * Copyright 2012 Gregory Haskins.
  *
  * See include/linux/shm_signal.h for documentation
  *
  * Author:
- *      Gregory Haskins <ghaskins@novell.com>
+ *      Gregory Haskins <gregory.haskins@gmail.com>
  *
  * This file is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License
@@ -21,11 +22,11 @@
  */
 
 #include <linux/module.h>
+#include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/shm_signal.h>
 #include <linux/workqueue.h>
 #include <linux/eventfd.h>
-#include <linux/slab.h>
 
 /*
  * ---------------------------------------------

@@ -13,6 +13,7 @@
 #include <linux/backlight.h>
 #include <linux/mfd/adp5520.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 
 struct adp5520_bl {
 	struct device *master;
@@ -211,8 +212,12 @@ static ssize_t adp5520_bl_daylight_max_store(struct device *dev,
 			const char *buf, size_t count)
 {
 	struct adp5520_bl *data = dev_get_drvdata(dev);
+	int ret;
 
-	strict_strtoul(buf, 10, &data->cached_daylight_max);
+	ret = strict_strtoul(buf, 10, &data->cached_daylight_max);
+	if (ret < 0)
+		return ret;
+
 	return adp5520_store(dev, buf, count, ADP5520_DAYLIGHT_MAX);
 }
 static DEVICE_ATTR(daylight_max, 0664, adp5520_bl_daylight_max_show,
@@ -303,6 +308,7 @@ static int __devinit adp5520_bl_probe(struct platform_device *pdev)
 	mutex_init(&data->lock);
 
 	memset(&props, 0, sizeof(struct backlight_properties));
+	props.type = BACKLIGHT_RAW;
 	props.max_brightness = ADP5020_MAX_BRIGHTNESS;
 	bl = backlight_device_register(pdev->name, data->master, data,
 				       &adp5520_bl_ops, &props);

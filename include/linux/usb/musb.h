@@ -3,7 +3,7 @@
  * Inventra (Multidrop) Highspeed Dual-Role Controllers:  (M)HDRC.
  *
  * Board initialization should put one of these into dev->platform_data,
- * probably on some platform_device named "musb_hdrc".  It encapsulates
+ * probably on some platform_device named "musb-hdrc".  It encapsulates
  * key configuration differences between boards.
  */
 
@@ -22,12 +22,47 @@ enum musb_mode {
 
 struct clk;
 
+enum musb_fifo_style {
+	FIFO_RXTX,
+	FIFO_TX,
+	FIFO_RX
+} __attribute__ ((packed));
+
+enum musb_buf_mode {
+	BUF_SINGLE,
+	BUF_DOUBLE
+} __attribute__ ((packed));
+
+struct musb_fifo_cfg {
+	u8			hw_ep_num;
+	enum musb_fifo_style	style;
+	enum musb_buf_mode	mode;
+	u16			maxpacket;
+};
+
+#define MUSB_EP_FIFO(ep, st, m, pkt)		\
+{						\
+	.hw_ep_num	= ep,			\
+	.style		= st,			\
+	.mode		= m,			\
+	.maxpacket	= pkt,			\
+}
+
+#define MUSB_EP_FIFO_SINGLE(ep, st, pkt)	\
+	MUSB_EP_FIFO(ep, st, BUF_SINGLE, pkt)
+
+#define MUSB_EP_FIFO_DOUBLE(ep, st, pkt)	\
+	MUSB_EP_FIFO(ep, st, BUF_DOUBLE, pkt)
+
 struct musb_hdrc_eps_bits {
 	const char	name[16];
 	u8		bits;
 };
 
 struct musb_hdrc_config {
+	struct musb_fifo_cfg	*fifo_cfg;	/* board fifo configuration */
+	unsigned		fifo_cfg_size;	/* size of the fifo configuration */
+
 	/* MUSB configuration-specific details */
 	unsigned	multipoint:1;	/* multipoint device */
 	unsigned	dyn_fifo:1 __deprecated; /* supports dynamic fifo sizing */
@@ -51,8 +86,11 @@ struct musb_hdrc_config {
 
 	struct musb_hdrc_eps_bits *eps_bits __deprecated;
 #ifdef CONFIG_BLACKFIN
-        /* A GPIO controlling VRSEL in Blackfin */
-        unsigned int    gpio_vrsel;
+	/* A GPIO controlling VRSEL in Blackfin */
+	unsigned int	gpio_vrsel;
+	unsigned int	gpio_vrsel_active;
+	/* musb CLKIN in Blackfin in MHZ */
+	unsigned char   clkin;
 #endif
 
 };
@@ -82,14 +120,14 @@ struct musb_hdrc_platform_data {
 	/* Power the device on or off */
 	int		(*set_power)(int state);
 
-	/* Turn device clock on or off */
-	int		(*set_clock)(struct clk *clock, int is_on);
-
 	/* MUSB configuration-specific details */
 	struct musb_hdrc_config	*config;
 
 	/* Architecture specific board data	*/
 	void		*board_data;
+
+	/* Platform specific struct musb_ops pointer */
+	const void	*platform_ops;
 };
 
 

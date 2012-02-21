@@ -15,6 +15,20 @@
 
 #include <linux/init.h>
 
+/*
+ * Memory entry used for the DEBUG_LL UART configuration, relative to
+ * start of RAM. See also uncompress.h and debug-macro.S.
+ *
+ * Note that using a memory location for storing the UART configuration
+ * has at least two limitations:
+ *
+ * 1. Kernel uncompress code cannot overlap OMAP_UART_INFO as the
+ *    uncompress code could then partially overwrite itself
+ * 2. We assume printascii is called at least once before paging_init,
+ *    and addruart has a chance to read OMAP_UART_INFO
+ */
+#define OMAP_UART_INFO_OFS	0x3ffc
+
 /* OMAP1 serial ports */
 #define OMAP1_UART1_BASE	0xfffb0000
 #define OMAP1_UART2_BASE	0xfffb0800
@@ -37,9 +51,17 @@
 #define OMAP4_UART3_BASE	0x48020000
 #define OMAP4_UART4_BASE	0x4806e000
 
+/* TI816X serial ports */
+#define TI816X_UART1_BASE	0x48020000
+#define TI816X_UART2_BASE	0x48022000
+#define TI816X_UART3_BASE	0x48024000
+
+/* AM3505/3517 UART4 */
+#define AM35XX_UART4_BASE	0x4809E000	/* Only on AM3505/3517 */
+
 /* External port on Zoom2/3 */
 #define ZOOM_UART_BASE		0x10000000
-#define ZOOM_UART_VIRT		0xfb000000
+#define ZOOM_UART_VIRT		0xfa400000
 
 #define OMAP_PORT_SHIFT		2
 #define OMAP7XX_PORT_SHIFT	0
@@ -67,6 +89,9 @@
 #define OMAP4UART2		OMAP2UART2
 #define OMAP4UART3		43
 #define OMAP4UART4		44
+#define TI816XUART1		81
+#define TI816XUART2		82
+#define TI816XUART3		83
 #define ZOOM_UART		95		/* Only on zoom2/3 */
 
 /* This is only used by 8250.c for omap1510 */
@@ -79,9 +104,11 @@
 			})
 
 #ifndef __ASSEMBLER__
-extern void __init omap_serial_early_init(void);
+
+struct omap_board_data;
+
 extern void omap_serial_init(void);
-extern void omap_serial_init_port(int port);
+extern void omap_serial_init_port(struct omap_board_data *bdata);
 extern int omap_uart_can_sleep(void);
 extern void omap_uart_check_wakeup(void);
 extern void omap_uart_prepare_suspend(void);

@@ -45,7 +45,7 @@
 #include <linux/wait.h>
 #include <linux/err.h>
 #include <linux/platform_device.h>
-#include <linux/moduleparam.h>
+#include <linux/module.h>
 #include <sound/core.h>
 #include <sound/seq_kernel.h>
 #include <sound/seq_virmidi.h>
@@ -94,7 +94,7 @@ static int __devinit snd_virmidi_probe(struct platform_device *devptr)
 			      sizeof(struct snd_card_virmidi), &card);
 	if (err < 0)
 		return err;
-	vmidi = (struct snd_card_virmidi *)card->private_data;
+	vmidi = card->private_data;
 	vmidi->card = card;
 
 	if (midi_devs[dev] > MAX_MIDI_DEVICES) {

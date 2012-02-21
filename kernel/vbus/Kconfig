@@ -2,7 +2,7 @@
 # Virtual-Bus (VBus) configuration
 #
 
-menuconfig VBUS
+config VBUS
        bool "Virtual-Bus Containers"
        select CONFIGFS_FS
        select SHM_SIGNAL
@@ -18,7 +18,20 @@ menuconfig VBUS
 	If you plan on using this kernel as a VBUS backend, say Y.  If
 	unsure, say N
 
-config VBUS_DEVICES
+menuconfig VBUS_CONNECTORS
+       bool "Virtual-Bus Connectors"
+       depends on VBUS
+       default n
+       help
+        Connectors bridge a vbus container to an environment, such
+	as a hypervisor or userspace.
+
+	If you plan on using this kernel as a VBUS backend, say Y.  If
+	unsure, say N
+
+source "kernel/vbus/connectors/Kconfig"
+
+menuconfig VBUS_DEVICES
        bool "Virtual-Bus Devices"
        depends on VBUS
        default n
@@ -28,4 +41,3 @@ config VBUS_DEVICES
 	 If unsure, say N
 
 source "kernel/vbus/devices/Kconfig"
-source "kernel/vbus/connectors/Kconfig"

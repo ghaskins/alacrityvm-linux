@@ -27,7 +27,7 @@
  * the link between the common hardware parts and the subdrivers (e.g.
  * interrupt handling).
  *
- * The c67x00 has 2 SIE's (serial interface engine) wich can be configured
+ * The c67x00 has 2 SIE's (serial interface engine) which can be configured
  * to be host, device or OTG (with some limitations, E.G. only SIE1 can be OTG).
  *
  * Depending on the platform configuration, the SIE's are created and
@@ -38,6 +38,7 @@
 #include <linux/io.h>
 #include <linux/list.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 #include <linux/usb.h>
 #include <linux/usb/c67x00.h>
 

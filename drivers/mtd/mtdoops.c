@@ -1,7 +1,7 @@
 /*
  * MTD Oops/Panic logger
  *
- * Copyright (C) 2007 Nokia Corporation. All rights reserved.
+ * Copyright © 2007 Nokia Corporation. All rights reserved.
  *
  * Author: Richard Purdie <rpurdie@openedhand.com>
  *
@@ -258,7 +258,7 @@ static void find_next_position(struct mtdoops_context *cxt)
 		ret = mtd->read(mtd, page * record_size, MTDOOPS_HEADER_SIZE,
 				&retlen, (u_char *) &count[0]);
 		if (retlen != MTDOOPS_HEADER_SIZE ||
-				(ret < 0 && ret != -EUCLEAN)) {
+				(ret < 0 && !mtd_is_bitflip(ret))) {
 			printk(KERN_ERR "mtdoops: read failure at %ld (%td of %d read), err %d\n",
 			       page * record_size, retlen,
 			       MTDOOPS_HEADER_SIZE, ret);
@@ -306,6 +306,11 @@ static void mtdoops_do_dump(struct kmsg_dumper *dumper,
 	unsigned long s1_start, s2_start;
 	unsigned long l1_cpy, l2_cpy;
 	char *dst;
+
+	if (reason != KMSG_DUMP_OOPS &&
+	    reason != KMSG_DUMP_PANIC &&
+	    reason != KMSG_DUMP_KEXEC)
+		return;
 
 	/* Only dump oopses if dump_oops is set */
 	if (reason == KMSG_DUMP_OOPS && !dump_oops)
@@ -396,7 +401,8 @@ static void mtdoops_notify_remove(struct mtd_info *mtd)
 		printk(KERN_WARNING "mtdoops: could not unregister kmsg_dumper\n");
 
 	cxt->mtd = NULL;
-	flush_scheduled_work();
+	flush_work_sync(&cxt->work_erase);
+	flush_work_sync(&cxt->work_write);
 }
 
 
@@ -429,11 +435,6 @@ static int __init mtdoops_init(void)
 	mtd_index = simple_strtoul(mtddev, &endp, 0);
 	if (*endp == '\0')
 		cxt->mtd_index = mtd_index;
-	if (cxt->mtd_index > MAX_MTD_DEVICES) {
-		printk(KERN_ERR "mtdoops: invalid mtd device number (%u) given\n",
-				mtd_index);
-		return -EINVAL;
-	}
 
 	cxt->oops_buf = vmalloc(record_size);
 	if (!cxt->oops_buf) {

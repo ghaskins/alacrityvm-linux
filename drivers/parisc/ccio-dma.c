@@ -44,6 +44,7 @@
 #include <linux/seq_file.h>
 #include <linux/scatterlist.h>
 #include <linux/iommu-helper.h>
+#include <linux/export.h>
 
 #include <asm/byteorder.h>
 #include <asm/cache.h>		/* for L1_CACHE_BYTES */
@@ -1241,10 +1242,10 @@ static struct parisc_driver ccio_driver = {
 };
 
 /**
- * ccio_ioc_init - Initalize the I/O Controller
+ * ccio_ioc_init - Initialize the I/O Controller
  * @ioc: The I/O Controller.
  *
- * Initalize the I/O Controller which includes setting up the
+ * Initialize the I/O Controller which includes setting up the
  * I/O Page Directory, the resource map, and initalizing the
  * U2/Uturn chip into virtual mode.
  */

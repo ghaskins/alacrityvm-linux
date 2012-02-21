@@ -21,10 +21,10 @@
 #include <media/davinci/vpfe_capture.h>
 
 #define DM365_EMAC_BASE			(0x01D07000)
+#define DM365_EMAC_MDIO_BASE		(DM365_EMAC_BASE + 0x4000)
 #define DM365_EMAC_CNTRL_OFFSET		(0x0000)
 #define DM365_EMAC_CNTRL_MOD_OFFSET	(0x3000)
 #define DM365_EMAC_CNTRL_RAM_OFFSET	(0x1000)
-#define DM365_EMAC_MDIO_OFFSET		(0x4000)
 #define DM365_EMAC_CNTRL_RAM_SIZE	(0x2000)
 
 /* Base of key scan register bank */
@@ -35,6 +35,10 @@
 #define DAVINCI_DM365_VC_BASE		(0x01D0C000)
 #define DAVINCI_DMA_VC_TX		2
 #define DAVINCI_DMA_VC_RX		3
+
+#define DM365_ASYNC_EMIF_CONTROL_BASE	0x01D10000
+#define DM365_ASYNC_EMIF_DATA_CE0_BASE	0x02000000
+#define DM365_ASYNC_EMIF_DATA_CE1_BASE	0x04000000
 
 void __init dm365_init(void);
 void __init dm365_init_asp(struct snd_platform_data *pdata);

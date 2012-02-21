@@ -61,15 +61,14 @@ static int _DoC_WaitReady(void __iomem * docptr)
 {
 	unsigned int c = 0xffff;
 
-	DEBUG(MTD_DEBUG_LEVEL3,
-	      "_DoC_WaitReady called for out-of-line wait\n");
+	pr_debug("_DoC_WaitReady called for out-of-line wait\n");
 
 	/* Out-of-line routine to wait for chip response */
 	while (((ReadDOC(docptr, Mplus_FlashControl) & CDSN_CTRL_FR_B_MASK) != CDSN_CTRL_FR_B_MASK) && --c)
 		;
 
 	if (c == 0)
-		DEBUG(MTD_DEBUG_LEVEL2, "_DoC_WaitReady timed out.\n");
+		pr_debug("_DoC_WaitReady timed out.\n");
 
 	return (c == 0);
 }
@@ -90,7 +89,7 @@ static inline int DoC_WaitReady(void __iomem * docptr)
 	return ret;
 }
 
-/* For some reason the Millennium Plus seems to occassionally put itself
+/* For some reason the Millennium Plus seems to occasionally put itself
  * into reset mode. For me this happens randomly, with no pattern that I
  * can detect. M-systems suggest always check this on any block level
  * operation and setting to normal mode if in reset mode.
@@ -499,7 +498,7 @@ void DoCMilPlus_init(struct mtd_info *mtd)
 		docmilpluslist = mtd;
 		mtd->size  = this->totlen;
 		mtd->erasesize = this->erasesize;
-		add_mtd_device(mtd);
+		mtd_device_register(mtd, NULL, 0);
 		return;
 	}
 }
@@ -655,7 +654,7 @@ static int doc_read(struct mtd_info *mtd, loff_t from, size_t len,
 #ifdef ECC_DEBUG
 		printk("DiskOnChip ECC Error: Read at %lx\n", (long)from);
 #endif
-		/* Read the ECC syndrom through the DiskOnChip ECC logic.
+		/* Read the ECC syndrome through the DiskOnChip ECC logic.
 		   These syndrome will be all ZERO when there is no error */
 		for (i = 0; i < 6; i++)
 			syndrome[i] = ReadDOC(docptr, Mplus_ECCSyndrome0 + i);
@@ -835,7 +834,7 @@ static int doc_read_oob(struct mtd_info *mtd, loff_t ofs,
 	uint8_t *buf = ops->oobbuf;
 	size_t len = ops->len;
 
-	BUG_ON(ops->mode != MTD_OOB_PLACE);
+	BUG_ON(ops->mode != MTD_OPS_PLACE_OOB);
 
 	ofs += ops->ooboffs;
 
@@ -920,7 +919,7 @@ static int doc_write_oob(struct mtd_info *mtd, loff_t ofs,
 	uint8_t *buf = ops->oobbuf;
 	size_t len = ops->len;
 
-	BUG_ON(ops->mode != MTD_OOB_PLACE);
+	BUG_ON(ops->mode != MTD_OPS_PLACE_OOB);
 
 	ofs += ops->ooboffs;
 
@@ -1091,7 +1090,7 @@ static void __exit cleanup_doc2001plus(void)
 		this = mtd->priv;
 		docmilpluslist = this->nextdoc;
 
-		del_mtd_device(mtd);
+		mtd_device_unregister(mtd);
 
 		iounmap(this->virtadr);
 		kfree(this->chips);

@@ -174,12 +174,13 @@ enum {
 #include <linux/rwsem.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
+#include <linux/percpu_counter.h>
 
 #include <linux/dqblk_xfs.h>
 #include <linux/dqblk_v1.h>
 #include <linux/dqblk_v2.h>
 
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 
 typedef __kernel_uid32_t qid_t; /* Type in which we store ids in memory */
 typedef long long qsize_t;	/* Type in which we store sizes */
@@ -238,18 +239,35 @@ static inline int info_dirty(struct mem_dqinfo *info)
 	return test_bit(DQF_INFO_DIRTY_B, &info->dqi_flags);
 }
 
-struct dqstats {
-	int lookups;
-	int drops;
-	int reads;
-	int writes;
-	int cache_hits;
-	int allocated_dquots;
-	int free_dquots;
-	int syncs;
+enum {
+	DQST_LOOKUPS,
+	DQST_DROPS,
+	DQST_READS,
+	DQST_WRITES,
+	DQST_CACHE_HITS,
+	DQST_ALLOC_DQUOTS,
+	DQST_FREE_DQUOTS,
+	DQST_SYNCS,
+	_DQST_DQSTAT_LAST
 };
 
+struct dqstats {
+	int stat[_DQST_DQSTAT_LAST];
+	struct percpu_counter counter[_DQST_DQSTAT_LAST];
+};
+
+extern struct dqstats *dqstats_pcpu;
 extern struct dqstats dqstats;
+
+static inline void dqstats_inc(unsigned int type)
+{
+	percpu_counter_inc(&dqstats.counter[type]);
+}
+
+static inline void dqstats_dec(unsigned int type)
+{
+	percpu_counter_dec(&dqstats.counter[type]);
+}
 
 #define DQ_MOD_B	0	/* dquot modified since read */
 #define DQ_BLKS_B	1	/* uid/gid has been warned about blk limit */
@@ -304,19 +322,20 @@ struct dquot_operations {
 	qsize_t *(*get_reserved_space) (struct inode *);
 };
 
+struct path;
+
 /* Operations handling requests from userspace */
 struct quotactl_ops {
-	int (*quota_on)(struct super_block *, int, int, char *, int);
-	int (*quota_off)(struct super_block *, int, int);
+	int (*quota_on)(struct super_block *, int, int, struct path *);
+	int (*quota_on_meta)(struct super_block *, int, int);
+	int (*quota_off)(struct super_block *, int);
 	int (*quota_sync)(struct super_block *, int, int);
 	int (*get_info)(struct super_block *, int, struct if_dqinfo *);
 	int (*set_info)(struct super_block *, int, struct if_dqinfo *);
-	int (*get_dqblk)(struct super_block *, int, qid_t, struct if_dqblk *);
-	int (*set_dqblk)(struct super_block *, int, qid_t, struct if_dqblk *);
+	int (*get_dqblk)(struct super_block *, int, qid_t, struct fs_disk_quota *);
+	int (*set_dqblk)(struct super_block *, int, qid_t, struct fs_disk_quota *);
 	int (*get_xstate)(struct super_block *, struct fs_quota_stat *);
 	int (*set_xstate)(struct super_block *, unsigned int, int);
-	int (*get_xquota)(struct super_block *, int, qid_t, struct fs_disk_quota *);
-	int (*set_xquota)(struct super_block *, int, qid_t, struct fs_disk_quota *);
 };
 
 struct quota_format_type {
@@ -395,14 +414,6 @@ struct quota_module_name {
 	{QFMT_VFS_OLD, "quota_v1"},\
 	{QFMT_VFS_V0, "quota_v2"},\
 	{0, NULL}}
-
-#else
-
-# /* nodep */ include <sys/cdefs.h>
-
-__BEGIN_DECLS
-long quotactl __P ((unsigned int, const char *, int, caddr_t));
-__END_DECLS
 
 #endif /* __KERNEL__ */
 #endif /* _QUOTA_ */

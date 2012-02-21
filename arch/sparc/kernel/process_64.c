@@ -12,7 +12,7 @@
 #include <stdarg.h>
 
 #include <linux/errno.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -202,6 +202,7 @@ void show_regs(struct pt_regs *regs)
 	       regs->u_regs[15]);
 	printk("RPC: <%pS>\n", (void *) regs->u_regs[15]);
 	show_regwindow(regs);
+	show_stack(current, (unsigned long *) regs->u_regs[UREG_FP]);
 }
 
 struct global_reg_snapshot global_reg_snapshot[NR_CPUS];
@@ -302,7 +303,7 @@ void arch_trigger_all_cpu_backtrace(void)
 
 #ifdef CONFIG_MAGIC_SYSRQ
 
-static void sysrq_handle_globreg(int key, struct tty_struct *tty)
+static void sysrq_handle_globreg(int key)
 {
 	arch_trigger_all_cpu_backtrace();
 }
@@ -367,9 +368,6 @@ void flush_thread(void)
 
 	/* Clear FPU register state. */
 	t->fpsaved[0] = 0;
-	
-	if (get_thread_current_ds() != ASI_AIUS)
-		set_fs(USER_DS);
 }
 
 /* It's a bit more tricky when 64-bit tasks are involved... */
@@ -738,9 +736,9 @@ asmlinkage int sparc_execve(struct pt_regs *regs)
 	if (IS_ERR(filename))
 		goto out;
 	error = do_execve(filename,
-			  (char __user * __user *)
+			  (const char __user *const __user *)
 			  regs->u_regs[base + UREG_I1],
-			  (char __user * __user *)
+			  (const char __user *const __user *)
 			  regs->u_regs[base + UREG_I2], regs);
 	putname(filename);
 	if (!error) {

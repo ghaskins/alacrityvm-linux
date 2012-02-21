@@ -41,6 +41,7 @@
 #include <asm/ppc_asm.h>
 #include <asm/asm-offsets.h>
 #include <asm/cache.h>
+#include <asm/ptrace.h>
 #include "head_booke.h"
 
 /* As with the other PowerPC ports, it is expected that when code
@@ -62,17 +63,30 @@ _ENTRY(_start);
 	 * of abatron_pteptrs
 	 */
 	nop
-/*
- * Save parameters we are passed
- */
-	mr	r31,r3
-	mr	r30,r4
-	mr	r29,r5
-	mr	r28,r6
-	mr	r27,r7
-	li	r25,0		/* phys kernel start (low) */
-	li	r24,0		/* CPU number */
-	li	r23,0		/* phys kernel start (high) */
+
+	/* Translate device tree address to physical, save in r30/r31 */
+	mfmsr	r16
+	mfspr	r17,SPRN_PID
+	rlwinm	r17,r17,16,0x3fff0000	/* turn PID into MAS6[SPID] */
+	rlwimi	r17,r16,28,0x00000001	/* turn MSR[DS] into MAS6[SAS] */
+	mtspr	SPRN_MAS6,r17
+
+	tlbsx	0,r3			/* must succeed */
+
+	mfspr	r16,SPRN_MAS1
+	mfspr	r20,SPRN_MAS3
+	rlwinm	r17,r16,25,0x1f		/* r17 = log2(page size) */
+	li	r18,1024
+	slw	r18,r18,r17		/* r18 = page size */
+	addi	r18,r18,-1
+	and	r19,r3,r18		/* r19 = page offset */
+	andc	r31,r20,r18		/* r31 = page base */
+	or	r31,r31,r19		/* r31 = devtree phys addr */
+	mfspr	r30,SPRN_MAS7
+
+	li	r25,0			/* phys kernel start (low) */
+	li	r24,0			/* CPU number */
+	li	r23,0			/* phys kernel start (high) */
 
 /* We try to not make any assumptions about how the boot loader
  * setup or used the TLBs.  We invalidate all mappings from the
@@ -94,204 +108,10 @@ _ENTRY(_start);
  */
 
 _ENTRY(__early_start)
-/* 1. Find the index of the entry we're executing in */
-	bl	invstr				/* Find our address */
-invstr:	mflr	r6				/* Make it accessible */
-	mfmsr	r7
-	rlwinm	r4,r7,27,31,31			/* extract MSR[IS] */
-	mfspr	r7, SPRN_PID0
-	slwi	r7,r7,16
-	or	r7,r7,r4
-	mtspr	SPRN_MAS6,r7
-	tlbsx	0,r6				/* search MSR[IS], SPID=PID0 */
-	mfspr	r7,SPRN_MAS1
-	andis.	r7,r7,MAS1_VALID@h
-	bne	match_TLB
 
-	mfspr	r7,SPRN_MMUCFG
-	rlwinm	r7,r7,21,28,31			/* extract MMUCFG[NPIDS] */
-	cmpwi	r7,3
-	bne	match_TLB			/* skip if NPIDS != 3 */
-
-	mfspr	r7,SPRN_PID1
-	slwi	r7,r7,16
-	or	r7,r7,r4
-	mtspr	SPRN_MAS6,r7
-	tlbsx	0,r6				/* search MSR[IS], SPID=PID1 */
-	mfspr	r7,SPRN_MAS1
-	andis.	r7,r7,MAS1_VALID@h
-	bne	match_TLB
-	mfspr	r7, SPRN_PID2
-	slwi	r7,r7,16
-	or	r7,r7,r4
-	mtspr	SPRN_MAS6,r7
-	tlbsx	0,r6				/* Fall through, we had to match */
-
-match_TLB:
-	mfspr	r7,SPRN_MAS0
-	rlwinm	r3,r7,16,20,31			/* Extract MAS0(Entry) */
-
-	mfspr	r7,SPRN_MAS1			/* Insure IPROT set */
-	oris	r7,r7,MAS1_IPROT@h
-	mtspr	SPRN_MAS1,r7
-	tlbwe
-
-/* 2. Invalidate all entries except the entry we're executing in */
-	mfspr	r9,SPRN_TLB1CFG
-	andi.	r9,r9,0xfff
-	li	r6,0				/* Set Entry counter to 0 */
-1:	lis	r7,0x1000			/* Set MAS0(TLBSEL) = 1 */
-	rlwimi	r7,r6,16,4,15			/* Setup MAS0 = TLBSEL | ESEL(r6) */
-	mtspr	SPRN_MAS0,r7
-	tlbre
-	mfspr	r7,SPRN_MAS1
-	rlwinm	r7,r7,0,2,31			/* Clear MAS1 Valid and IPROT */
-	cmpw	r3,r6
-	beq	skpinv				/* Dont update the current execution TLB */
-	mtspr	SPRN_MAS1,r7
-	tlbwe
-	isync
-skpinv:	addi	r6,r6,1				/* Increment */
-	cmpw	r6,r9				/* Are we done? */
-	bne	1b				/* If not, repeat */
-
-	/* Invalidate TLB0 */
-	li	r6,0x04
-	tlbivax 0,r6
-	TLBSYNC
-	/* Invalidate TLB1 */
-	li	r6,0x0c
-	tlbivax 0,r6
-	TLBSYNC
-
-/* 3. Setup a temp mapping and jump to it */
-	andi.	r5, r3, 0x1	/* Find an entry not used and is non-zero */
-	addi	r5, r5, 0x1
-	lis	r7,0x1000	/* Set MAS0(TLBSEL) = 1 */
-	rlwimi	r7,r3,16,4,15	/* Setup MAS0 = TLBSEL | ESEL(r3) */
-	mtspr	SPRN_MAS0,r7
-	tlbre
-
-	/* grab and fixup the RPN */
-	mfspr	r6,SPRN_MAS1	/* extract MAS1[SIZE] */
-	rlwinm	r6,r6,25,27,31
-	li	r8,-1
-	addi	r6,r6,10
-	slw	r6,r8,r6	/* convert to mask */
-
-	bl	1f		/* Find our address */
-1:	mflr	r7
-
-	mfspr	r8,SPRN_MAS3
-#ifdef CONFIG_PHYS_64BIT
-	mfspr	r23,SPRN_MAS7
-#endif
-	and	r8,r6,r8
-	subfic	r9,r6,-4096
-	and	r9,r9,r7
-
-	or	r25,r8,r9
-	ori	r8,r25,(MAS3_SX|MAS3_SW|MAS3_SR)
-
-	/* Just modify the entry ID and EPN for the temp mapping */
-	lis	r7,0x1000	/* Set MAS0(TLBSEL) = 1 */
-	rlwimi	r7,r5,16,4,15	/* Setup MAS0 = TLBSEL | ESEL(r5) */
-	mtspr	SPRN_MAS0,r7
-	xori	r6,r4,1		/* Setup TMP mapping in the other Address space */
-	slwi	r6,r6,12
-	oris	r6,r6,(MAS1_VALID|MAS1_IPROT)@h
-	ori	r6,r6,(MAS1_TSIZE(BOOK3E_PAGESZ_4K))@l
-	mtspr	SPRN_MAS1,r6
-	mfspr	r6,SPRN_MAS2
-	li	r7,0		/* temp EPN = 0 */
-	rlwimi	r7,r6,0,20,31
-	mtspr	SPRN_MAS2,r7
-	mtspr	SPRN_MAS3,r8
-	tlbwe
-
-	xori	r6,r4,1
-	slwi	r6,r6,5		/* setup new context with other address space */
-	bl	1f		/* Find our address */
-1:	mflr	r9
-	rlwimi	r7,r9,0,20,31
-	addi	r7,r7,(2f - 1b)
-	mtspr	SPRN_SRR0,r7
-	mtspr	SPRN_SRR1,r6
-	rfi
-2:
-/* 4. Clear out PIDs & Search info */
-	li	r6,0
-	mtspr   SPRN_MAS6,r6
-	mtspr	SPRN_PID0,r6
-
-	mfspr	r7,SPRN_MMUCFG
-	rlwinm	r7,r7,21,28,31			/* extract MMUCFG[NPIDS] */
-	cmpwi	r7,3
-	bne	2f				/* skip if NPIDS != 3 */
-
-	mtspr	SPRN_PID1,r6
-	mtspr	SPRN_PID2,r6
-
-/* 5. Invalidate mapping we started in */
-2:
-	lis	r7,0x1000	/* Set MAS0(TLBSEL) = 1 */
-	rlwimi	r7,r3,16,4,15	/* Setup MAS0 = TLBSEL | ESEL(r3) */
-	mtspr	SPRN_MAS0,r7
-	tlbre
-	mfspr	r6,SPRN_MAS1
-	rlwinm	r6,r6,0,2,0	/* clear IPROT */
-	mtspr	SPRN_MAS1,r6
-	tlbwe
-	/* Invalidate TLB1 */
-	li	r9,0x0c
-	tlbivax 0,r9
-	TLBSYNC
-
-/* The mapping only needs to be cache-coherent on SMP */
-#ifdef CONFIG_SMP
-#define M_IF_SMP	MAS2_M
-#else
-#define M_IF_SMP	0
-#endif
-
-/* 6. Setup KERNELBASE mapping in TLB1[0] */
-	lis	r6,0x1000		/* Set MAS0(TLBSEL) = TLB1(1), ESEL = 0 */
-	mtspr	SPRN_MAS0,r6
-	lis	r6,(MAS1_VALID|MAS1_IPROT)@h
-	ori	r6,r6,(MAS1_TSIZE(BOOK3E_PAGESZ_64M))@l
-	mtspr	SPRN_MAS1,r6
-	lis	r6,MAS2_VAL(PAGE_OFFSET, BOOK3E_PAGESZ_64M, M_IF_SMP)@h
-	ori	r6,r6,MAS2_VAL(PAGE_OFFSET, BOOK3E_PAGESZ_64M, M_IF_SMP)@l
-	mtspr	SPRN_MAS2,r6
-	mtspr	SPRN_MAS3,r8
-	tlbwe
-
-/* 7. Jump to KERNELBASE mapping */
-	lis	r6,(KERNELBASE & ~0xfff)@h
-	ori	r6,r6,(KERNELBASE & ~0xfff)@l
-	lis	r7,MSR_KERNEL@h
-	ori	r7,r7,MSR_KERNEL@l
-	bl	1f			/* Find our address */
-1:	mflr	r9
-	rlwimi	r6,r9,0,20,31
-	addi	r6,r6,(2f - 1b)
-	mtspr	SPRN_SRR0,r6
-	mtspr	SPRN_SRR1,r7
-	rfi				/* start execution out of TLB1[0] entry */
-
-/* 8. Clear out the temp mapping */
-2:	lis	r7,0x1000	/* Set MAS0(TLBSEL) = 1 */
-	rlwimi	r7,r5,16,4,15	/* Setup MAS0 = TLBSEL | ESEL(r5) */
-	mtspr	SPRN_MAS0,r7
-	tlbre
-	mfspr	r8,SPRN_MAS1
-	rlwinm	r8,r8,0,2,0	/* clear IPROT */
-	mtspr	SPRN_MAS1,r8
-	tlbwe
-	/* Invalidate TLB1 */
-	li	r9,0x0c
-	tlbivax 0,r9
-	TLBSYNC
+#define ENTRY_MAPPING_BOOT_SETUP
+#include "fsl_booke_entry_mapping.S"
+#undef ENTRY_MAPPING_BOOT_SETUP
 
 	/* Establish the interrupt vector offsets */
 	SET_IVOR(0,  CriticalInput);
@@ -346,8 +166,11 @@ skpinv:	addi	r6,r6,1				/* Increment */
 	/* Check to see if we're the second processor, and jump
 	 * to the secondary_start code if so
 	 */
-	mfspr	r24,SPRN_PIR
-	cmpwi	r24,0
+	lis	r24, boot_cpuid@h
+	ori	r24, r24, boot_cpuid@l
+	lwz	r24, 0(r24)
+	cmpwi	r24, -1
+	mfspr   r24,SPRN_PIR
 	bne	__secondary_start
 #endif
 
@@ -369,6 +192,9 @@ skpinv:	addi	r6,r6,1				/* Increment */
 	li	r0,0
 	stwu	r0,THREAD_SIZE-STACK_FRAME_OVERHEAD(r1)
 
+	rlwinm  r22,r1,0,0,31-THREAD_SHIFT      /* current thread_info */
+	stw	r24, TI_CPU(r22)
+
 	bl	early_init
 
 #ifdef CONFIG_RELOCATABLE
@@ -385,11 +211,8 @@ skpinv:	addi	r6,r6,1				/* Increment */
 /*
  * Decide what sort of machine this is and initialize the MMU.
  */
-	mr	r3,r31
-	mr	r4,r30
-	mr	r5,r29
-	mr	r6,r28
-	mr	r7,r27
+	mr	r3,r30
+	mr	r4,r31
 	bl	machine_init
 	bl	MMU_init
 
@@ -423,8 +246,24 @@ skpinv:	addi	r6,r6,1				/* Increment */
  * if we find the pte (fall through):
  *   r11 is low pte word
  *   r12 is pointer to the pte
+ *   r10 is the pshift from the PGD, if we're a hugepage
  */
 #ifdef CONFIG_PTE_64BIT
+#ifdef CONFIG_HUGETLB_PAGE
+#define FIND_PTE	\
+	rlwinm	r12, r10, 13, 19, 29;	/* Compute pgdir/pmd offset */	\
+	lwzx	r11, r12, r11;		/* Get pgd/pmd entry */		\
+	rlwinm.	r12, r11, 0, 0, 20;	/* Extract pt base address */	\
+	blt	1000f;			/* Normal non-huge page */	\
+	beq	2f;			/* Bail if no table */		\
+	oris	r11, r11, PD_HUGE@h;	/* Put back address bit */	\
+	andi.	r10, r11, HUGEPD_SHIFT_MASK@l; /* extract size field */	\
+	xor	r12, r10, r11;		/* drop size bits from pointer */ \
+	b	1001f;							\
+1000:	rlwimi	r12, r10, 23, 20, 28;	/* Compute pte address */	\
+	li	r10, 0;			/* clear r10 */			\
+1001:	lwz	r11, 4(r12);		/* Get pte entry */
+#else
 #define FIND_PTE	\
 	rlwinm	r12, r10, 13, 19, 29;	/* Compute pgdir/pmd offset */	\
 	lwzx	r11, r12, r11;		/* Get pgd/pmd entry */		\
@@ -432,7 +271,8 @@ skpinv:	addi	r6,r6,1				/* Increment */
 	beq	2f;			/* Bail if no table */		\
 	rlwimi	r12, r10, 23, 20, 28;	/* Compute pte address */	\
 	lwz	r11, 4(r12);		/* Get pte entry */
-#else
+#endif /* HUGEPAGE */
+#else /* !PTE_64BIT */
 #define FIND_PTE	\
 	rlwimi	r11, r10, 12, 20, 29;	/* Create L1 (pgdir/pmd) address */	\
 	lwz	r11, 0(r11);		/* Get L1 entry */			\
@@ -513,7 +353,7 @@ interrupt_base:
 	NORMAL_EXCEPTION_PROLOG
 	EXC_XFER_EE_LITE(0x0c00, DoSyscall)
 
-	/* Auxillary Processor Unavailable Interrupt */
+	/* Auxiliary Processor Unavailable Interrupt */
 	EXCEPTION(0x2900, AuxillaryProcessorUnavailable, unknown_exception, EXC_XFER_EE)
 
 	/* Decrementer Interrupt */
@@ -533,11 +373,12 @@ interrupt_base:
 	/* Data TLB Error Interrupt */
 	START_EXCEPTION(DataTLBError)
 	mtspr	SPRN_SPRG_WSCRATCH0, r10 /* Save some working registers */
-	mtspr	SPRN_SPRG_WSCRATCH1, r11
-	mtspr	SPRN_SPRG_WSCRATCH2, r12
-	mtspr	SPRN_SPRG_WSCRATCH3, r13
-	mfcr	r11
-	mtspr	SPRN_SPRG_WSCRATCH4, r11
+	mfspr	r10, SPRN_SPRG_THREAD
+	stw	r11, THREAD_NORMSAVE(0)(r10)
+	stw	r12, THREAD_NORMSAVE(1)(r10)
+	stw	r13, THREAD_NORMSAVE(2)(r10)
+	mfcr	r13
+	stw	r13, THREAD_NORMSAVE(3)(r10)
 	mfspr	r10, SPRN_DEAR		/* Get faulting address */
 
 	/* If we are faulting a kernel address, we have to use the
@@ -588,8 +429,8 @@ interrupt_base:
 
 #ifdef CONFIG_PTE_64BIT
 #ifdef CONFIG_SMP
-	subf	r10,r11,r12		/* create false data dep */
-	lwzx	r13,r11,r10		/* Get upper pte bits */
+	subf	r13,r11,r12		/* create false data dep */
+	lwzx	r13,r11,r13		/* Get upper pte bits */
 #else
 	lwz	r13,0(r12)		/* Get upper pte bits */
 #endif
@@ -603,11 +444,12 @@ interrupt_base:
 	/* The bailout.  Restore registers to pre-exception conditions
 	 * and call the heavyweights to help us out.
 	 */
-	mfspr	r11, SPRN_SPRG_RSCRATCH4
+	mfspr	r10, SPRN_SPRG_THREAD
+	lwz	r11, THREAD_NORMSAVE(3)(r10)
 	mtcr	r11
-	mfspr	r13, SPRN_SPRG_RSCRATCH3
-	mfspr	r12, SPRN_SPRG_RSCRATCH2
-	mfspr	r11, SPRN_SPRG_RSCRATCH1
+	lwz	r13, THREAD_NORMSAVE(2)(r10)
+	lwz	r12, THREAD_NORMSAVE(1)(r10)
+	lwz	r11, THREAD_NORMSAVE(0)(r10)
 	mfspr	r10, SPRN_SPRG_RSCRATCH0
 	b	DataStorage
 
@@ -619,11 +461,12 @@ interrupt_base:
 	 */
 	START_EXCEPTION(InstructionTLBError)
 	mtspr	SPRN_SPRG_WSCRATCH0, r10 /* Save some working registers */
-	mtspr	SPRN_SPRG_WSCRATCH1, r11
-	mtspr	SPRN_SPRG_WSCRATCH2, r12
-	mtspr	SPRN_SPRG_WSCRATCH3, r13
-	mfcr	r11
-	mtspr	SPRN_SPRG_WSCRATCH4, r11
+	mfspr	r10, SPRN_SPRG_THREAD
+	stw	r11, THREAD_NORMSAVE(0)(r10)
+	stw	r12, THREAD_NORMSAVE(1)(r10)
+	stw	r13, THREAD_NORMSAVE(2)(r10)
+	mfcr	r13
+	stw	r13, THREAD_NORMSAVE(3)(r10)
 	mfspr	r10, SPRN_SRR0		/* Get faulting address */
 
 	/* If we are faulting a kernel address, we have to use the
@@ -667,8 +510,8 @@ interrupt_base:
 
 #ifdef CONFIG_PTE_64BIT
 #ifdef CONFIG_SMP
-	subf	r10,r11,r12		/* create false data dep */
-	lwzx	r13,r11,r10		/* Get upper pte bits */
+	subf	r13,r11,r12		/* create false data dep */
+	lwzx	r13,r11,r13		/* Get upper pte bits */
 #else
 	lwz	r13,0(r12)		/* Get upper pte bits */
 #endif
@@ -683,11 +526,12 @@ interrupt_base:
 	/* The bailout.  Restore registers to pre-exception conditions
 	 * and call the heavyweights to help us out.
 	 */
-	mfspr	r11, SPRN_SPRG_RSCRATCH4
+	mfspr	r10, SPRN_SPRG_THREAD
+	lwz	r11, THREAD_NORMSAVE(3)(r10)
 	mtcr	r11
-	mfspr	r13, SPRN_SPRG_RSCRATCH3
-	mfspr	r12, SPRN_SPRG_RSCRATCH2
-	mfspr	r11, SPRN_SPRG_RSCRATCH1
+	lwz	r13, THREAD_NORMSAVE(2)(r10)
+	lwz	r12, THREAD_NORMSAVE(1)(r10)
+	lwz	r11, THREAD_NORMSAVE(0)(r10)
 	mfspr	r10, SPRN_SPRG_RSCRATCH0
 	b	InstructionStorage
 
@@ -731,7 +575,7 @@ interrupt_base:
 /*
  * Both the instruction and data TLB miss get to this
  * point to load the TLB.
- *	r10 - available to use
+ *	r10 - tsize encoding (if HUGETLB_PAGE) or available to use
  *	r11 - TLB (info from Linux PTE)
  *	r12 - available to use
  *	r13 - upper bits of PTE (if PTE_64BIT) or available to use
@@ -741,21 +585,73 @@ interrupt_base:
  *	Upon exit, we reload everything and RFI.
  */
 finish_tlb_load:
+#ifdef CONFIG_HUGETLB_PAGE
+	cmpwi	6, r10, 0			/* check for huge page */
+	beq	6, finish_tlb_load_cont    	/* !huge */
+
+	/* Alas, we need more scratch registers for hugepages */
+	mfspr	r12, SPRN_SPRG_THREAD
+	stw	r14, THREAD_NORMSAVE(4)(r12)
+	stw	r15, THREAD_NORMSAVE(5)(r12)
+	stw	r16, THREAD_NORMSAVE(6)(r12)
+	stw	r17, THREAD_NORMSAVE(7)(r12)
+
+	/* Get the next_tlbcam_idx percpu var */
+#ifdef CONFIG_SMP
+	lwz	r12, THREAD_INFO-THREAD(r12)
+	lwz	r15, TI_CPU(r12)
+	lis     r14, __per_cpu_offset@h
+	ori     r14, r14, __per_cpu_offset@l
+	rlwinm  r15, r15, 2, 0, 29
+	lwzx    r16, r14, r15
+#else
+	li	r16, 0
+#endif
+	lis     r17, next_tlbcam_idx@h
+	ori	r17, r17, next_tlbcam_idx@l
+	add	r17, r17, r16			/* r17 = *next_tlbcam_idx */
+	lwz     r15, 0(r17)			/* r15 = next_tlbcam_idx */
+
+	lis	r14, MAS0_TLBSEL(1)@h		/* select TLB1 (TLBCAM) */
+	rlwimi	r14, r15, 16, 4, 15		/* next_tlbcam_idx entry */
+	mtspr	SPRN_MAS0, r14
+
+	/* Extract TLB1CFG(NENTRY) */
+	mfspr	r16, SPRN_TLB1CFG
+	andi.	r16, r16, 0xfff
+
+	/* Update next_tlbcam_idx, wrapping when necessary */
+	addi	r15, r15, 1
+	cmpw	r15, r16
+	blt 	100f
+	lis	r14, tlbcam_index@h
+	ori	r14, r14, tlbcam_index@l
+	lwz	r15, 0(r14)
+100:	stw	r15, 0(r17)
+
+	/*
+	 * Calc MAS1_TSIZE from r10 (which has pshift encoded)
+	 * tlb_enc = (pshift - 10).
+	 */
+	subi	r15, r10, 10
+	mfspr	r16, SPRN_MAS1
+	rlwimi	r16, r15, 7, 20, 24
+	mtspr	SPRN_MAS1, r16
+
+	/* copy the pshift for use later */
+	mr	r14, r10
+
+	/* fall through */
+
+#endif /* CONFIG_HUGETLB_PAGE */
+
 	/*
 	 * We set execute, because we don't have the granularity to
 	 * properly set this at the page level (Linux problem).
 	 * Many of these bits are software only.  Bits we don't set
 	 * here we (properly should) assume have the appropriate value.
 	 */
-
-	mfspr	r12, SPRN_MAS2
-#ifdef CONFIG_PTE_64BIT
-	rlwimi	r12, r11, 32-19, 27, 31	/* extract WIMGE from pte */
-#else
-	rlwimi	r12, r11, 26, 27, 31	/* extract WIMGE from pte */
-#endif
-	mtspr	SPRN_MAS2, r12
-
+finish_tlb_load_cont:
 #ifdef CONFIG_PTE_64BIT
 	rlwinm	r12, r11, 32-2, 26, 31	/* Move in perm bits */
 	andi.	r10, r11, _PAGE_DIRTY
@@ -764,22 +660,40 @@ finish_tlb_load:
 	andc	r12, r12, r10
 1:	rlwimi	r12, r13, 20, 0, 11	/* grab RPN[32:43] */
 	rlwimi	r12, r11, 20, 12, 19	/* grab RPN[44:51] */
-	mtspr	SPRN_MAS3, r12
+2:	mtspr	SPRN_MAS3, r12
 BEGIN_MMU_FTR_SECTION
 	srwi	r10, r13, 12		/* grab RPN[12:31] */
 	mtspr	SPRN_MAS7, r10
 END_MMU_FTR_SECTION_IFSET(MMU_FTR_BIG_PHYS)
 #else
 	li	r10, (_PAGE_EXEC | _PAGE_PRESENT)
+	mr	r13, r11
 	rlwimi	r10, r11, 31, 29, 29	/* extract _PAGE_DIRTY into SW */
 	and	r12, r11, r10
 	andi.	r10, r11, _PAGE_USER	/* Test for _PAGE_USER */
 	slwi	r10, r12, 1
 	or	r10, r10, r12
 	iseleq	r12, r12, r10
-	rlwimi	r11, r12, 0, 20, 31	/* Extract RPN from PTE and merge with perms */
-	mtspr	SPRN_MAS3, r11
+	rlwimi	r13, r12, 0, 20, 31	/* Get RPN from PTE, merge w/ perms */
+	mtspr	SPRN_MAS3, r13
 #endif
+
+	mfspr	r12, SPRN_MAS2
+#ifdef CONFIG_PTE_64BIT
+	rlwimi	r12, r11, 32-19, 27, 31	/* extract WIMGE from pte */
+#else
+	rlwimi	r12, r11, 26, 27, 31	/* extract WIMGE from pte */
+#endif
+#ifdef CONFIG_HUGETLB_PAGE
+	beq	6, 3f			/* don't mask if page isn't huge */
+	li	r13, 1
+	slw	r13, r13, r14
+	subi	r13, r13, 1
+	rlwinm	r13, r13, 0, 0, 19	/* bottom bits used for WIMGE/etc */
+	andc	r12, r12, r13		/* mask off ea bits within the page */
+#endif
+3:	mtspr	SPRN_MAS2, r12
+
 #ifdef CONFIG_E200
 	/* Round robin TLB1 entries assignment */
 	mfspr	r12, SPRN_MAS0
@@ -805,14 +719,23 @@ END_MMU_FTR_SECTION_IFSET(MMU_FTR_BIG_PHYS)
 	mtspr	SPRN_MAS0,r12
 #endif /* CONFIG_E200 */
 
+tlb_write_entry:
 	tlbwe
 
 	/* Done...restore registers and get out of here.  */
-	mfspr	r11, SPRN_SPRG_RSCRATCH4
+	mfspr	r10, SPRN_SPRG_THREAD
+#ifdef CONFIG_HUGETLB_PAGE
+	beq	6, 8f /* skip restore for 4k page faults */
+	lwz	r14, THREAD_NORMSAVE(4)(r10)
+	lwz	r15, THREAD_NORMSAVE(5)(r10)
+	lwz	r16, THREAD_NORMSAVE(6)(r10)
+	lwz	r17, THREAD_NORMSAVE(7)(r10)
+#endif
+8:	lwz	r11, THREAD_NORMSAVE(3)(r10)
 	mtcr	r11
-	mfspr	r13, SPRN_SPRG_RSCRATCH3
-	mfspr	r12, SPRN_SPRG_RSCRATCH2
-	mfspr	r11, SPRN_SPRG_RSCRATCH1
+	lwz	r13, THREAD_NORMSAVE(2)(r10)
+	lwz	r12, THREAD_NORMSAVE(1)(r10)
+	lwz	r11, THREAD_NORMSAVE(0)(r10)
 	mfspr	r10, SPRN_SPRG_RSCRATCH0
 	rfi					/* Force context change */
 
@@ -843,7 +766,7 @@ load_up_spe:
 	cmpi	0,r4,0
 	beq	1f
 	addi	r4,r4,THREAD	/* want THREAD of last_task_used_spe */
-	SAVE_32EVRS(0,r10,r4)
+	SAVE_32EVRS(0,r10,r4,THREAD_EVR0)
 	evxor	evr10, evr10, evr10	/* clear out evr10 */
 	evmwumiaa evr10, evr10, evr10	/* evr10 <- ACC = 0 * 0 + ACC */
 	li	r5,THREAD_ACC
@@ -863,7 +786,7 @@ load_up_spe:
 	stw	r4,THREAD_USED_SPE(r5)
 	evlddx	evr4,r10,r5
 	evmra	evr4,evr4
-	REST_32EVRS(0,r10,r5)
+	REST_32EVRS(0,r10,r5,THREAD_EVR0)
 #ifndef CONFIG_SMP
 	subi	r4,r5,THREAD
 	stw	r4,last_task_used_spe@l(r3)
@@ -974,13 +897,11 @@ _GLOBAL(giveup_spe)
 	addi	r3,r3,THREAD		/* want THREAD of task */
 	lwz	r5,PT_REGS(r3)
 	cmpi	0,r5,0
-	SAVE_32EVRS(0, r4, r3)
+	SAVE_32EVRS(0, r4, r3, THREAD_EVR0)
 	evxor	evr6, evr6, evr6	/* clear out evr6 */
 	evmwumiaa evr6, evr6, evr6	/* evr6 <- ACC = 0 * 0 + ACC */
 	li	r4,THREAD_ACC
 	evstddx	evr6, r4, r3		/* save off accumulator */
-	mfspr	r6,SPRN_SPEFSCR
-	stw	r6,THREAD_SPEFSCR(r3)	/* save spefscr register value */
 	beq	1f
 	lwz	r4,_MSR-STACK_FRAME_OVERHEAD(r5)
 	lis	r3,MSR_SPE@h

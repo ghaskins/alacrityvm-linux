@@ -17,6 +17,7 @@
 #include <linux/mm.h>
 #include <linux/init.h>
 #include <linux/kdebug.h>
+#include <linux/ftrace.h>
 #include <linux/gfp.h>
 
 #include <asm/smp.h>
@@ -621,7 +622,7 @@ static const char CHAFSR_PERR_msg[] =
 static const char CHAFSR_IERR_msg[] =
 	"Internal processor error";
 static const char CHAFSR_ISAP_msg[] =
-	"System request parity error on incoming addresss";
+	"System request parity error on incoming address";
 static const char CHAFSR_UCU_msg[] =
 	"Uncorrectable E-cache ECC error for ifetch/data";
 static const char CHAFSR_UCC_msg[] =
@@ -1803,7 +1804,7 @@ static const char *sun4v_err_type_to_str(u32 type)
 		return "warning resumable";
 	default:
 		return "unknown";
-	};
+	}
 }
 
 static void sun4v_log_error(struct pt_regs *regs, struct sun4v_error_entry *ent, int cpu, const char *pfx, atomic_t *ocnt)
@@ -2151,9 +2152,12 @@ static void user_instruction_dump(unsigned int __user *pc)
 
 void show_stack(struct task_struct *tsk, unsigned long *_ksp)
 {
-	unsigned long fp, thread_base, ksp;
+	unsigned long fp, ksp;
 	struct thread_info *tp;
 	int count = 0;
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+	int graph = 0;
+#endif
 
 	ksp = (unsigned long) _ksp;
 	if (!tsk)
@@ -2169,7 +2173,6 @@ void show_stack(struct task_struct *tsk, unsigned long *_ksp)
 		flushw_all();
 
 	fp = ksp + STACK_BIAS;
-	thread_base = (unsigned long) tp;
 
 	printk("Call Trace:\n");
 	do {
@@ -2193,6 +2196,16 @@ void show_stack(struct task_struct *tsk, unsigned long *_ksp)
 		}
 
 		printk(" [%016lx] %pS\n", pc, (void *) pc);
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+		if ((pc + 8UL) == (unsigned long) &return_to_handler) {
+			int index = tsk->curr_ret_stack;
+			if (tsk->ret_stack && index >= graph) {
+				pc = tsk->ret_stack[index - graph].ret;
+				printk(" [%016lx] %pS\n", pc, (void *) pc);
+				graph++;
+			}
+		}
+#endif
 	} while (++count < 16);
 }
 

@@ -21,10 +21,6 @@ struct plat_nand_data {
 	struct nand_chip	chip;
 	struct mtd_info		mtd;
 	void __iomem		*io_base;
-#ifdef CONFIG_MTD_PARTITIONS
-	int			nr_parts;
-	struct mtd_partition	*parts;
-#endif
 };
 
 /*
@@ -36,6 +32,11 @@ static int __devinit plat_nand_probe(struct platform_device *pdev)
 	struct plat_nand_data *data;
 	struct resource *res;
 	int err = 0;
+
+	if (pdata->chip.nr_chips < 1) {
+		dev_err(&pdev->dev, "invalid number of chips specified\n");
+		return -EINVAL;
+	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res)
@@ -76,6 +77,7 @@ static int __devinit plat_nand_probe(struct platform_device *pdev)
 	data->chip.read_buf = pdata->ctrl.read_buf;
 	data->chip.chip_delay = pdata->chip.chip_delay;
 	data->chip.options |= pdata->chip.options;
+	data->chip.bbt_options |= pdata->chip.bbt_options;
 
 	data->chip.ecc.hwctl = pdata->ctrl.hwcontrol;
 	data->chip.ecc.layout = pdata->chip.ecclayout;
@@ -90,31 +92,15 @@ static int __devinit plat_nand_probe(struct platform_device *pdev)
 			goto out;
 	}
 
-	/* Scan to find existance of the device */
-	if (nand_scan(&data->mtd, 1)) {
+	/* Scan to find existence of the device */
+	if (nand_scan(&data->mtd, pdata->chip.nr_chips)) {
 		err = -ENXIO;
 		goto out;
 	}
 
-#ifdef CONFIG_MTD_PARTITIONS
-	if (pdata->chip.part_probe_types) {
-		err = parse_mtd_partitions(&data->mtd,
-					pdata->chip.part_probe_types,
-					&data->parts, 0);
-		if (err > 0) {
-			add_mtd_partitions(&data->mtd, data->parts, err);
-			return 0;
-		}
-	}
-	if (pdata->chip.set_parts)
-		pdata->chip.set_parts(data->mtd.size, &pdata->chip);
-	if (pdata->chip.partitions) {
-		data->parts = pdata->chip.partitions;
-		err = add_mtd_partitions(&data->mtd, data->parts,
-			pdata->chip.nr_partitions);
-	} else
-#endif
-	err = add_mtd_device(&data->mtd);
+	err = mtd_device_parse_register(&data->mtd,
+			pdata->chip.part_probe_types, 0,
+			pdata->chip.partitions, pdata->chip.nr_partitions);
 
 	if (!err)
 		return err;
@@ -144,10 +130,6 @@ static int __devexit plat_nand_remove(struct platform_device *pdev)
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
 	nand_release(&data->mtd);
-#ifdef CONFIG_MTD_PARTITIONS
-	if (data->parts && data->parts != pdata->chip.partitions)
-		kfree(data->parts);
-#endif
 	if (pdata->ctrl.remove)
 		pdata->ctrl.remove(pdev);
 	iounmap(data->io_base);

@@ -53,7 +53,8 @@
 #include "libipw.h"
 
 #define DRV_DESCRIPTION "802.11 data/management/control stack"
-#define DRV_NAME        "ieee80211"
+#define DRV_NAME        "libipw"
+#define DRV_PROCNAME	"ieee80211"
 #define DRV_VERSION	LIBIPW_VERSION
 #define DRV_COPYRIGHT   "Copyright (C) 2004-2005 Intel Corporation <jketreno@linux.intel.com>"
 
@@ -62,8 +63,8 @@ MODULE_DESCRIPTION(DRV_DESCRIPTION);
 MODULE_AUTHOR(DRV_COPYRIGHT);
 MODULE_LICENSE("GPL");
 
-struct cfg80211_ops libipw_config_ops = { };
-void *libipw_wiphy_privid = &libipw_wiphy_privid;
+static struct cfg80211_ops libipw_config_ops = { };
+static void *libipw_wiphy_privid = &libipw_wiphy_privid;
 
 static int libipw_networks_allocate(struct libipw_device *ieee)
 {
@@ -140,7 +141,7 @@ int libipw_change_mtu(struct net_device *dev, int new_mtu)
 }
 EXPORT_SYMBOL(libipw_change_mtu);
 
-struct net_device *alloc_ieee80211(int sizeof_priv, int monitor)
+struct net_device *alloc_libipw(int sizeof_priv, int monitor)
 {
 	struct libipw_device *ieee;
 	struct net_device *dev;
@@ -222,8 +223,9 @@ failed_free_netdev:
 failed:
 	return NULL;
 }
+EXPORT_SYMBOL(alloc_libipw);
 
-void free_ieee80211(struct net_device *dev, int monitor)
+void free_libipw(struct net_device *dev, int monitor)
 {
 	struct libipw_device *ieee = netdev_priv(dev);
 
@@ -237,6 +239,7 @@ void free_ieee80211(struct net_device *dev, int monitor)
 
 	free_netdev(dev);
 }
+EXPORT_SYMBOL(free_libipw);
 
 #ifdef CONFIG_LIBIPW_DEBUG
 
@@ -291,16 +294,16 @@ static int __init libipw_init(void)
 	struct proc_dir_entry *e;
 
 	libipw_debug_level = debug;
-	libipw_proc = proc_mkdir(DRV_NAME, init_net.proc_net);
+	libipw_proc = proc_mkdir(DRV_PROCNAME, init_net.proc_net);
 	if (libipw_proc == NULL) {
-		LIBIPW_ERROR("Unable to create " DRV_NAME
+		LIBIPW_ERROR("Unable to create " DRV_PROCNAME
 				" proc directory\n");
 		return -EIO;
 	}
 	e = proc_create("debug_level", S_IRUGO | S_IWUSR, libipw_proc,
 			&debug_level_proc_fops);
 	if (!e) {
-		remove_proc_entry(DRV_NAME, init_net.proc_net);
+		remove_proc_entry(DRV_PROCNAME, init_net.proc_net);
 		libipw_proc = NULL;
 		return -EIO;
 	}
@@ -317,7 +320,7 @@ static void __exit libipw_exit(void)
 #ifdef CONFIG_LIBIPW_DEBUG
 	if (libipw_proc) {
 		remove_proc_entry("debug_level", libipw_proc);
-		remove_proc_entry(DRV_NAME, init_net.proc_net);
+		remove_proc_entry(DRV_PROCNAME, init_net.proc_net);
 		libipw_proc = NULL;
 	}
 #endif				/* CONFIG_LIBIPW_DEBUG */
@@ -331,6 +334,3 @@ MODULE_PARM_DESC(debug, "debug output mask");
 
 module_exit(libipw_exit);
 module_init(libipw_init);
-
-EXPORT_SYMBOL(alloc_ieee80211);
-EXPORT_SYMBOL(free_ieee80211);

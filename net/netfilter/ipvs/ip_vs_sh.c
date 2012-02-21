@@ -147,10 +147,9 @@ static int ip_vs_sh_init_svc(struct ip_vs_service *svc)
 	/* allocate the SH table for this service */
 	tbl = kmalloc(sizeof(struct ip_vs_sh_bucket)*IP_VS_SH_TAB_SIZE,
 		      GFP_ATOMIC);
-	if (tbl == NULL) {
-		pr_err("%s(): no memory\n", __func__);
+	if (tbl == NULL)
 		return -ENOMEM;
-	}
+
 	svc->sched_data = tbl;
 	IP_VS_DBG(6, "SH hash table (memory=%Zdbytes) allocated for "
 		  "current service\n",
@@ -223,7 +222,7 @@ ip_vs_sh_schedule(struct ip_vs_service *svc, const struct sk_buff *skb)
 	    || !(dest->flags & IP_VS_DEST_F_AVAILABLE)
 	    || atomic_read(&dest->weight) <= 0
 	    || is_overloaded(dest)) {
-		IP_VS_ERR_RL("SH: no destination available\n");
+		ip_vs_scheduler_err(svc, "no destination available");
 		return NULL;
 	}
 
