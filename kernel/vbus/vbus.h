@@ -29,8 +29,7 @@
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/kref.h>
-
-#include "map.h"
+#include <linux/map.h>
 
 #define VBUS_VERSION 1
 
