@@ -1,0 +1,6 @@
+config INFINIBAND_VBUS
+	tristate "Virtual-bus Infiniband HCA support"
+	depends on VBUS_PROXY
+	---help---
+	  This is a low-level driver for a virtual Infiniband HCA
+	  device on a virtual-bus.

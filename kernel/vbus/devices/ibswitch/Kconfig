@@ -1,0 +1,11 @@
+config VBUS_IBSWITCH
+       tristate "Virtual-Bus Infiniband Switch"
+       depends on VBUS_DEVICES
+       default n
+       help
+        Provides a virtual Infiniband switch for intra-host routing
+	of IB packets from VBIB HCA devices
+
+	If unsure, say N
+
+
