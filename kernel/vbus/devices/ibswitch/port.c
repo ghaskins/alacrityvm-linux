@@ -29,6 +29,42 @@ MODULE_AUTHOR("Gregory Haskins");
 MODULE_LICENSE("GPL");
 
 /*
+ * Negotiate Capabilities - This function is provided so that the
+ * interface may be extended without breaking ABI compatability
+ *
+ * The caller is expected to send down any capabilities they would like
+ * to enable, and the device will OR them with capabilities that it
+ * supports.  This value is then returned so that both sides may
+ * ascertain the lowest-common-denominator of features to enable
+ */
+static int
+ibswitch_hca_call_negcap(struct ibport *port, void *data, unsigned long len)
+{
+	struct vbus_memctx *ctx = port->ctx;
+	struct vbib_capabilities caps;
+	int ret;
+
+	if (len != sizeof(caps))
+		return -EINVAL;
+
+	ret = ctx->ops->copy_from(ctx, &caps, data, sizeof(caps));
+	if (ret)
+		return -EFAULT;
+
+	switch (caps.gid) {
+	default:
+		caps.bits = 0;
+		break;
+	}
+
+	ret = ctx->ops->copy_to(ctx, data, &caps, sizeof(caps));
+	if (ret)
+		return -EFAULT;
+
+	return 0;
+}
+
+/*
  * This is called whenever a driver wants to perform a synchronous
  * "function call" to our device.  It is similar to the notion of
  * an ioctl().  The parameters are part of the ABI between the device
@@ -46,6 +82,8 @@ ibswitch_hca_call(struct vbus_connection *conn,
 	PDEBUG("call -> %d with %p/%d\n", func, data, len);
 
 	switch (func) {
+	    case VBIB_FUNC_NEGCAP:
+		return ibswitch_hca_call_negcap(port, data, len);
 	default:
 		return -EINVAL;
 	}

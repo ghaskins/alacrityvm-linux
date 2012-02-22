@@ -34,6 +34,11 @@
 #define VBIB_ATTR_SMLID        3
 #define VBIB_ATTR_LMC          4
 
+struct vbib_capabilities {
+	__u32 gid;
+	__u32 bits;
+};
+
 struct vbib_attr {
 	__u32       attr;
 	__u32       len;
