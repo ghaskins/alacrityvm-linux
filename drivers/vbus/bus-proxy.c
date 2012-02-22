@@ -92,6 +92,8 @@ static int __init vbus_init(void)
 {
 	int ret;
 
+	printk(KERN_INFO "VBUS Proxy: Copyright (C) 2009-2012 Gregory Haskins\n");
+
 	ret = bus_register(&vbus_proxy);
 	BUG_ON(ret < 0);
 

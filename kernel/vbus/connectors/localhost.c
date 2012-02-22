@@ -199,7 +199,7 @@ guest_device_call(struct vbus_device_proxy *dev, u32 func,
 		void *data, size_t len, int flags)
 {
 	struct guest_device *_dev = to_dev(dev);
-	return downcall_devcall(_dev->handle, func, data, len, flags);
+	return downcall_devcall(_dev->handle, func, __pa(data), len, flags);
 }
 
 static void
@@ -232,12 +232,14 @@ upcall_devadd(const char *type, unsigned long id)
 	_dev = kzalloc(sizeof(*_dev), GFP_KERNEL);
 	BUG_ON(!_dev);
 
+	INIT_LIST_HEAD(&_dev->shms);
+
 	strncpy(_dev->type, type, VBUS_MAX_DEVTYPE_LEN);
 	_dev->dev.type = _dev->type;
 	_dev->dev.id   = id;
 	_dev->dev.ops  = &guest_device_ops;
 
-	INIT_LIST_HEAD(&_dev->shms);
+	dev_set_name(&_dev->dev.dev, "%lld", id);
 
 	mutex_lock(&_localhost_guest.lock);
 	ret = radix_tree_insert(&_localhost_guest.devices, id, _dev);
