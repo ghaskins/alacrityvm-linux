@@ -41,7 +41,7 @@ devcall(struct vbib_priv *priv, u32 func, void *data, size_t len)
 static int
 getattr(struct vbib_priv *priv, u32 attr, void *data, size_t len)
 {
-	struct vbib_attr _data = {attr, len, (u64)data};
+	struct vbib_attr _data = {attr, len, (u64)__pa(data)};
 
 	return devcall(priv, VBIB_FUNC_GET_ATTR,  &_data, sizeof(_data));
 }

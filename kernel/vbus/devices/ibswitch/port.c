@@ -64,6 +64,47 @@ ibswitch_hca_call_negcap(struct ibport *port, void *data, unsigned long len)
 	return 0;
 }
 
+static int
+ibswitch_hca_call_getattr(struct ibport *port, void *data, unsigned long len)
+{
+	struct vbus_memctx *ctx = port->ctx;
+	struct vbib_attr desc;
+	int ret;
+
+	if (len != sizeof(desc))
+		return -EINVAL;
+
+	ret = ctx->ops->copy_from(ctx, &desc, data, len);
+	if (ret)
+		return -EFAULT;
+
+#define G(A)                                                            \
+	if (desc.len != sizeof(A))					\
+		return -EINVAL;                                         \
+                                                                        \
+	ret = ctx->ops->copy_to(ctx, (void*)desc.ptr, &(A), sizeof(A)); \
+	if (ret)                                                        \
+		return -EFAULT;                                         \
+	return 0;                                                       \
+
+        switch (desc.attr) {
+	case VBIB_ATTR_HWVER:
+		G(port->ibswitch->hwver);
+	case VBIB_ATTR_LID:
+		G(port->lid);
+	case VBIB_ATTR_SMLID:
+		G(port->smlid);
+	case VBIB_ATTR_LMC:
+		G(port->lmc);
+	default:
+		return -EINVAL;
+	}
+
+#undef G
+
+	return 0;
+}
+
 /*
  * This is called whenever a driver wants to perform a synchronous
  * "function call" to our device.  It is similar to the notion of
@@ -82,8 +123,10 @@ ibswitch_hca_call(struct vbus_connection *conn,
 	PDEBUG("call -> %d with %p/%d\n", func, data, len);
 
 	switch (func) {
-	    case VBIB_FUNC_NEGCAP:
+	case VBIB_FUNC_NEGCAP:
 		return ibswitch_hca_call_negcap(port, data, len);
+	case VBIB_FUNC_GET_ATTR:
+		return ibswitch_hca_call_getattr(port, data, len);
 	default:
 		return -EINVAL;
 	}

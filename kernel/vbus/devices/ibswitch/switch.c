@@ -34,20 +34,26 @@ static struct ibport *node_to_port(struct rb_node *node)
 	return node ? container_of(node, struct ibport, node) : NULL;
 }
 
+static int lid_compare(lid_t lhs, lid_t rhs)
+{
+    /* FIXME: This will likely become something other than a primative type */
+    return lhs - rhs;
+}
+
 static int port_item_compare(struct rb_node *lhs, struct rb_node *rhs)
 {
 	struct ibport *lport = node_to_port(lhs);
 	struct ibport *rport = node_to_port(rhs);
 
-	return lport->guid - rport->guid;
+	return lid_compare(lport->lid, rport->lid);
 }
 
 static int port_key_compare(const void *key, struct rb_node *node)
 {
 	struct ibport *port = node_to_port(node);
-	long guid = *(long *)key;
+	lid_t lid = *(lid_t *)key;
 
-	return guid - port->guid;
+	return lid_compare(lid, port->lid);
 }
 
 static struct map_ops port_map_ops = {
@@ -146,6 +152,7 @@ ibswitch_create(struct vbus_devclass *dc, struct vbus_device **vdev)
 
 	mutex_init(&priv->lock);
 	map_init(&priv->port_map, &port_map_ops);
+	priv->hwver = 1;
 
 	/*
 	 * vbus init

@@ -19,8 +19,12 @@
 
 struct ibswitch;
 
+typedef long lid_t;
+
 struct ibport {
-	long                          guid;
+	lid_t                         lid;
+	lid_t                         smlid;
+	long                          lmc;
 	bool                          opened;
 	struct rb_node                node;
 	struct vbus                  *bus;
@@ -34,6 +38,7 @@ struct ibswitch {
 	struct mutex       lock;
 	struct map         port_map;
 	struct vbus_device vdev;
+	u32                hwver;
 };
 
 static inline struct ibport *intf_to_port(struct vbus_device_interface *intf)
