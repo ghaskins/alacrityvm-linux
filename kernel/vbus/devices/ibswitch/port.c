@@ -85,22 +85,50 @@ ibswitch_hca_call_getattr(struct ibport *port, void *data, unsigned long len)
 	ret = ctx->ops->copy_to(ctx, (void*)desc.ptr, &(A), sizeof(A)); \
 	if (ret)                                                        \
 		return -EFAULT;                                         \
-	return 0;                                                       \
+	return 0;
+
+#define GC(A)					                        \
+	{ 
 
         switch (desc.attr) {
-	case VBIB_ATTR_HWVER:
-		G(port->ibswitch->hwver);
-	case VBIB_ATTR_LID:
-		G(port->lid);
-	case VBIB_ATTR_SMLID:
-		G(port->smlid);
-	case VBIB_ATTR_LMC:
-		G(port->lmc);
+	case VBIB_ATTR_GID_TABLE_LEN: {
+		unsigned long val = GID_TABLE_LEN;
+		G(val);
+	}
+	case VBIB_ATTR_PKEY_TABLE_LEN: {
+		unsigned long val = PKEY_TABLE_LEN;
+		G(val);
+	}
 	default:
 		return -EINVAL;
 	}
 
 #undef G
+
+	return 0;
+}
+
+static int
+ibswitch_hca_call_querysmi(struct ibport *port, void *data, unsigned long len)
+{
+	struct vbus_memctx *ctx = port->ctx;
+	struct ib_smp ismp, osmp;
+	int ret;
+
+	if (len != sizeof(ismp))
+		return -EINVAL;
+
+	ret = ctx->ops->copy_from(ctx, &ismp, data, len);
+	if (ret)
+		return -EFAULT;
+
+	ret = port_sma_get(port, &ismp, &osmp);
+	if (ret < 0)
+		return ret;
+
+	ret = ctx->ops->copy_to(ctx, data, &osmp, sizeof(len));
+	if (ret)
+		return -EFAULT;
 
 	return 0;
 }
@@ -127,6 +155,8 @@ ibswitch_hca_call(struct vbus_connection *conn,
 		return ibswitch_hca_call_negcap(port, data, len);
 	case VBIB_FUNC_GET_ATTR:
 		return ibswitch_hca_call_getattr(port, data, len);
+	case VBIB_FUNC_QUERY_LOCAL_SMI:
+		return ibswitch_hca_call_querysmi(port, data, len);
 	default:
 		return -EINVAL;
 	}

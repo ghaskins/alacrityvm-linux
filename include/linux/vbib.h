@@ -29,23 +29,22 @@
 #define VBIB_HCA_ABI_VERSION 1
 #define VBIB_UVERBS_ABI_VERSION 1
 
-#define VBIB_ATTR_HWVER        1
-#define VBIB_ATTR_LID          2
-#define VBIB_ATTR_SMLID        3
-#define VBIB_ATTR_LMC          4
-
 struct vbib_capabilities {
 	__u32 gid;
 	__u32 bits;
 };
 
+#define VBIB_ATTR_GID_TABLE_LEN       1
+#define VBIB_ATTR_PKEY_TABLE_LEN      2
+
 struct vbib_attr {
-	__u32       attr;
-	__u32       len;
-	aligned_u64 ptr;
+       __u32       attr;
+       __u32       len;
+       aligned_u64 ptr;
 };
 
-#define VBIB_FUNC_NEGCAP      0 /* negotiate capabilities */
-#define VBIB_FUNC_GET_ATTR    1
+#define VBIB_FUNC_NEGCAP                     0 /* negotiate capabilities */
+#define VBIB_FUNC_GET_ATTR                   1
+#define VBIB_FUNC_QUERY_LOCAL_SMI            2
 
 #endif /* _LINUX_VBIB_H */

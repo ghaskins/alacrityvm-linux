@@ -22,6 +22,10 @@ MODULE_VERSION("1");
 struct vbib_priv {
 	struct ib_device           ibdev; /* must be first */
 	struct vbus_device_proxy  *vdev;
+	struct {
+		long gid_table_len;
+		long pkey_table_len;
+	} limits;
 };
 
 static struct vbib_priv*
@@ -47,24 +51,42 @@ getattr(struct vbib_priv *priv, u32 attr, void *data, size_t len)
 }
 
 static int
+query_local_smi(struct vbib_priv *priv, struct ib_smp *data)
+{
+	return devcall(priv, VBIB_FUNC_QUERY_LOCAL_SMI,  &data, sizeof(data));
+}
+
+static void
+init_query_smp(struct ib_smp *data)
+{
+	memset(data, 0, sizeof(*data));
+	data->base_version  = 1;
+	data->mgmt_class    = IB_MGMT_CLASS_SUBN_LID_ROUTED;
+	data->class_version = 1;
+	data->method        = IB_MGMT_METHOD_GET;
+}
+
+static int
 vbib_query_device(struct ib_device *ibdev, struct ib_device_attr *props)
 {
 	struct vbib_priv *priv = ibdev_to_priv(ibdev);
-	u32 ver;
+	struct ib_smp smp;
 	int ret;
-	
-	ret = getattr(priv, VBIB_ATTR_HWVER, &ver, sizeof(ver));
-	if (ret < 0)
-	    return ret;
+
+	init_query_smp(&smp);
+	smp.attr_id = IB_SMP_ATTR_NODE_INFO;
+
+	ret = query_local_smi(priv, &smp);
+	if (ret)
+		return ret;
 
 	memset(props, 0, sizeof *props);
 
-	props->fw_ver              = ver;
-	props->hw_ver              = ver;
 	props->device_cap_flags    = 0;
-
-	props->vendor_id           = 0x30cc;
-	props->vendor_part_id      = 1;
+	props->vendor_id           = be32_to_cpup((__be32 *) (smp.data + 36)) &
+		0xffffff;
+	props->vendor_part_id      = be16_to_cpup((__be16 *) (smp.data + 30));
+	props->hw_ver              = be32_to_cpup((__be32 *) (smp.data + 32));
 
 	props->max_mr_size         = ~0ull;
 	props->page_size_cap       = 4 * 1024 * 1024;
@@ -84,27 +106,89 @@ static int
 vbib_query_port(struct ib_device *ibdev, u8 port, struct ib_port_attr *props)
 {
 	struct vbib_priv *priv = ibdev_to_priv(ibdev);
+	struct ib_smp smp;
 	int ret;
-	
+
+	init_query_smp(&smp);
+	smp.attr_id  = IB_SMP_ATTR_PORT_INFO;
+	smp.attr_mod = cpu_to_be32(port);
+
+	ret = query_local_smi(priv, &smp);
+	if (ret)
+		return ret;
+
 	memset(props, 0, sizeof *props);
 
-#define GET(T, D)                              \
-	ret = getattr(priv, T, &D, sizeof(D)); \
-	if (ret < 0)                           \
-	    return ret;
-
-	GET(VBIB_ATTR_LID,   props->lid);
-	GET(VBIB_ATTR_SMLID, props->sm_lid);
-	GET(VBIB_ATTR_LMC,   props->lmc);
-
-#undef GET
-
-	props->state             = IB_PORT_ACTIVE;
-	props->port_cap_flags    = IB_WIDTH_12X;
+	props->lid               = be16_to_cpup((__be16 *) (smp.data + 16));
+	props->lmc               = smp.data[34] & 0x7;
+	props->sm_lid            = be16_to_cpup((__be16 *) (smp.data + 18));
+	props->sm_sl             = smp.data[36] & 0xf;
+	props->state             = smp.data[32] & 0xf;
+	props->phys_state        = smp.data[33] >> 4;
+	props->port_cap_flags    = be32_to_cpup((__be32 *) (smp.data + 20));
+	props->gid_tbl_len       = priv->limits.gid_table_len;
 	props->max_msg_sz        = 0x80000000;
-	props->active_width      = IB_WIDTH_12X;
-	props->max_mtu           = IB_MTU_4096;
-	props->active_mtu        = IB_MTU_4096;
+	props->pkey_tbl_len      = priv->limits.pkey_table_len;
+	props->bad_pkey_cntr     = be16_to_cpup((__be16 *) (smp.data + 46));
+	props->qkey_viol_cntr    = be16_to_cpup((__be16 *) (smp.data + 48));
+	props->active_width      = smp.data[31] & 0xf;
+	props->active_speed      = smp.data[35] >> 4;
+	props->max_mtu           = smp.data[41] & 0xf;
+	props->active_mtu        = smp.data[36] >> 4;
+	props->subnet_timeout    = smp.data[51] & 0x1f;
+	props->max_vl_num        = smp.data[37] >> 4;
+	props->init_type_reply   = smp.data[41] >> 4;
+
+	return 0;
+}
+
+static int
+vbib_query_pkey(struct ib_device *ibdev,
+		 u8 port, u16 index, u16 *pkey)
+{
+	struct vbib_priv *priv = ibdev_to_priv(ibdev);
+	struct ib_smp smp;
+	int ret;
+
+	init_query_smp(&smp);
+	smp.attr_id  = IB_SMP_ATTR_PKEY_TABLE;
+	smp.attr_mod = cpu_to_be32(index / 32);
+
+	ret = query_local_smi(priv, &smp);
+	if (ret)
+		return ret;
+
+	*pkey = be16_to_cpu(((__be16 *) smp.data)[index % 32]);
+
+	return 0;
+}
+
+static int
+vbib_query_gid(struct ib_device *ibdev, u8 port, int index, union ib_gid *gid)
+{
+	struct vbib_priv *priv = ibdev_to_priv(ibdev);
+	struct ib_smp smp;
+	int ret;
+
+	init_query_smp(&smp);
+	smp.attr_id  = IB_SMP_ATTR_PORT_INFO;
+	smp.attr_mod = cpu_to_be32(port);
+
+	ret = query_local_smi(priv, &smp);
+	if (ret)
+		return ret;
+
+	memcpy(gid->raw, smp.data + 8, 8);
+
+	init_query_smp(&smp);
+	smp.attr_id  = IB_SMP_ATTR_GUID_INFO;
+	smp.attr_mod = cpu_to_be32(index / 8);
+
+	ret = query_local_smi(priv, &smp);
+	if (ret)
+		return ret;
+
+	memcpy(gid->raw + 8, smp.data + (index % 8) * 8, 8);
 
 	return 0;
 }
@@ -132,8 +216,20 @@ vbib_probe(struct vbus_device_proxy *vdev)
 		goto err;
 	}
 
+	priv->vdev = vdev;
+
 	strlcpy(priv->ibdev.name, "vbib%d", IB_DEVICE_NAME_MAX);
 	priv->ibdev.owner                = THIS_MODULE;
+
+#define GET(T, D)                              \
+	ret = getattr(priv, T, &D, sizeof(D)); \
+	if (ret < 0)                           \
+		return ret;
+	
+	GET(VBIB_ATTR_GID_TABLE_LEN,  priv->limits.gid_table_len);
+	GET(VBIB_ATTR_PKEY_TABLE_LEN, priv->limits.pkey_table_len);
+
+#undef GET
 
 	priv->ibdev.uverbs_abi_ver	 = VBIB_UVERBS_ABI_VERSION;
 	priv->ibdev.uverbs_cmd_mask	 = 0;
@@ -164,12 +260,12 @@ vbib_probe(struct vbus_device_proxy *vdev)
 	priv->ibdev.dma_device           = &vdev->dev;
 	priv->ibdev.query_device         = vbib_query_device;
 	priv->ibdev.query_port           = vbib_query_port;
+	priv->ibdev.query_pkey           = vbib_query_pkey;
+	priv->ibdev.query_gid            = vbib_query_gid;
 
 #if 0
 	priv->ibdev.modify_device        = vbib_modify_device;
 	priv->ibdev.modify_port          = vbib_modify_port;
-	priv->ibdev.query_pkey           = vbib_query_pkey;
-	priv->ibdev.query_gid            = vbib_query_gid;
 	priv->ibdev.alloc_ucontext       = vbib_alloc_ucontext;
 	priv->ibdev.dealloc_ucontext     = vbib_dealloc_ucontext;
 	priv->ibdev.mmap                 = vbib_mmap_uar;
@@ -201,8 +297,6 @@ vbib_probe(struct vbus_device_proxy *vdev)
 	ret = ib_register_device(&priv->ibdev, NULL);
 	if (ret)
 		goto err;
-
-	priv->vdev = vdev;
 
 	return ret;
 
