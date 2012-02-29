@@ -94,6 +94,9 @@ config USER_RETURN_NOTIFIER
 	  Provide a kernel-internal notification when a cpu is about to
 	  switch to user mode.
 
+config HAVE_CREATE_IRQ
+	bool
+
 config HAVE_IOREMAP_PROT
 	bool
 
