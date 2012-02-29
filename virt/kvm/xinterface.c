@@ -468,6 +468,77 @@ fail:
 
 }
 
+static unsigned long
+xinterface_sgmap(struct kvm_xinterface *intf,
+		 struct scatterlist *sgl, int nents,
+		 unsigned long flags)
+{
+	struct _xinterface     *_intf   = to_intf(intf);
+	struct task_struct     *p       = _intf->task;
+	struct mm_struct       *mm      = _intf->mm;
+	struct kvm             *kvm     = _intf->kvm;
+	struct kvm_memory_slot *memslot = NULL;
+	bool                    kthread = !current->mm;
+	int                     ret;
+	struct scatterlist     *sg;
+	int                     i;
+
+	mutex_lock(&kvm->slots_lock);
+
+	if (kthread)
+		use_mm(_intf->mm);
+
+	for_each_sg(sgl, sg, nents, i) {
+		unsigned long           gpa    = sg_dma_address(sg);
+		unsigned long           len    = sg_dma_len(sg);
+		unsigned long           gfn    = gpa >> PAGE_SHIFT;
+		off_t                   offset = offset_in_page(gpa);
+		unsigned long           hva;
+		struct page            *pg;
+
+		/* ensure that we do not have more than one page per entry */
+		if ((PAGE_ALIGN(len + offset) >> PAGE_SHIFT) != 1) {
+			ret = -EINVAL;
+			break;
+		}
+
+		/* check for a memslot-cache miss */
+		if (!memslot
+		    || gfn < memslot->base_gfn
+		    || gfn >= memslot->base_gfn + memslot->npages) {
+			memslot = gfn_to_memslot(kvm, gfn);
+			if (!memslot) {
+				ret = -EFAULT;
+				break;
+			}
+		}
+
+		hva = (memslot->userspace_addr +
+		       (gfn - memslot->base_gfn) * PAGE_SIZE);
+
+		if (kthread || current->mm == mm)
+			ret = get_user_pages_fast(hva, 1, 1, &pg);
+		else
+			ret = get_user_pages(p, mm, hva, 1, 1, 0, &pg, NULL);
+
+		if (ret != 1) {
+			if (ret >= 0)
+				ret = -EFAULT;
+			break;
+		}
+
+		sg_set_page(sg, pg, len, offset);
+		ret = 0;
+	}
+
+	if (kthread)
+		unuse_mm(_intf->mm);
+
+	mutex_unlock(&kvm->slots_lock);
+
+	return ret;
+}
+
 static void
 xinterface_release(struct kvm_xinterface *intf)
 {
@@ -484,6 +555,7 @@ struct kvm_xinterface_ops _xinterface_ops = {
 	.copy_from   = xinterface_copy_from,
 	.vmap        = xinterface_vmap,
 	.ioevent     = xinterface_ioevent,
+	.sgmap       = xinterface_sgmap,
 	.release     = xinterface_release,
 };
 

@@ -9,6 +9,7 @@
 #include <linux/kref.h>
 #include <linux/module.h>
 #include <linux/file.h>
+#include <linux/scatterlist.h>
 
 struct kvm_xinterface;
 struct kvm_xvmap;
@@ -36,6 +37,9 @@ struct kvm_xinterface_ops {
 					u64 addr,
 					unsigned long len,
 					unsigned long flags);
+	unsigned long (*sgmap)(struct kvm_xinterface *intf,
+			       struct scatterlist *sgl, int nents,
+			       unsigned long flags);
 	void (*release)(struct kvm_xinterface *);
 };
 
