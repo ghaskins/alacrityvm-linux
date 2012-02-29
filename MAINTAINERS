@@ -1874,6 +1874,12 @@ S:	Supported
 F:	Documentation/filesystems/cifs.txt
 F:	fs/cifs/
 
+SHM-SIGNAL LIBRARY
+M:	Gregory Haskins <gregory.haskins@gmail.com>
+S:	Maintained
+F:	include/linux/shm_signal.h
+F:	lib/shm_signal.c
+
 COMPACTPCI HOTPLUG CORE
 M:	Scott Murray <scott@spiteful.org>
 L:	linux-pci@vger.kernel.org

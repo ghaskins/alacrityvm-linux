@@ -256,6 +256,15 @@ config NLATTR
 config GENERIC_ATOMIC64
        bool
 
+config SHM_SIGNAL
+tristate "SHM Signal - Generic shared-memory signaling mechanism"
+       default n
+       help
+        Provides a shared-memory based signaling mechanism to indicate
+        memory-dirty notifications between two end-points.
+
+        If unsure, say N
+
 config LRU_CACHE
 	tristate
 
