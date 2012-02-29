@@ -1,10 +1,11 @@
 
-config VBUS_NULL
-       tristate "Virtual-Bus NULL connector"
+config VBUS_LOCALHOST
+       tristate "Virtual-Bus localhost connector"
        depends on VBUS_CONNECTORS
        default n
        help
-         Provides a example connector
+         Provides a example connector that bridges vbus devices to
+	 the same local kernel.
 
 	 If unsure, say N
 
