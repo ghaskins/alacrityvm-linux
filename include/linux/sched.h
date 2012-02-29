@@ -101,6 +101,7 @@ struct bio_list;
 struct fs_struct;
 struct perf_event_context;
 struct blk_plug;
+struct vbus;
 
 /*
  * List of flags we want to share for kernel threads,
@@ -1451,6 +1452,9 @@ struct task_struct {
 	unsigned int lockdep_recursion;
 	struct held_lock held_locks[MAX_LOCK_DEPTH];
 	gfp_t lockdep_reclaim_gfp;
+#endif
+#ifdef CONFIG_VBUS
+	void __rcu *vbus;
 #endif
 
 /* journalling filesystem info */

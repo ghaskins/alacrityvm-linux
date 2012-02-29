@@ -66,6 +66,7 @@
 #include <linux/user-return-notifier.h>
 #include <linux/oom.h>
 #include <linux/khugepaged.h>
+#include <linux/vbus.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -1375,6 +1376,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	if (clone_flags & CLONE_THREAD)
 		threadgroup_fork_read_unlock(current);
 	perf_event_fork(p);
+	fork_vbus(p);
 	return p;
 
 bad_fork_free_pid:

@@ -51,6 +51,7 @@
 #include <trace/events/sched.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/oom.h>
+#include <linux/vbus.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -993,6 +994,7 @@ NORET_TYPE void do_exit(long code)
 	perf_event_exit_task(tsk);
 
 	cgroup_exit(tsk, 1);
+	task_vbus_disassociate(tsk);
 
 	if (group_dead)
 		disassociate_ctty(1);

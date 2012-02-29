@@ -7111,8 +7111,10 @@ F:	drivers/video/uvesafb.*
 VBUS
 M:	Gregory Haskins <gregory.haskins@gmail.com>
 S:	Maintained
+F:	Documentation/vbus.txt
 F:	include/linux/vbus*
 F:	drivers/vbus/*
+F:	kernel/vbus/*
 
 VBUS ETHERNET DRIVER
 M:	Gregory Haskins <gregory.haskins@gmail.com>
