@@ -149,15 +149,14 @@ _signal_init(struct shm_signal *signal, struct shm_signal_desc *desc,
  */
 
 struct _signal {
+	char               name[64];
 	struct vbus_pci   *pcivbus;
 	struct shm_signal  signal;
 	u32                handle;
 	struct rb_node     node;
 	struct list_head   list;
-	struct {
-		int        notify;
-		int        inject;
-	} stats;
+	int                irq;
+	struct irq_desc   *desc;
 };
 
 static struct _signal *
@@ -172,7 +171,6 @@ _signal_inject(struct shm_signal *signal)
 	struct _signal *_signal = to_signal(signal);
 
 	vbus_pci.stats.inject++;
-	_signal->stats.inject++;
 	iowrite32(_signal->handle, &vbus_pci.signals->shmsignal);
 
 	return 0;
@@ -190,6 +188,8 @@ static struct shm_signal_ops _signal_ops = {
 	.inject  = _signal_inject,
 	.release = _signal_release,
 };
+
+static void shmsignal_disconnect(struct _signal *_signal);
 
 /*
  * -------------------
@@ -238,6 +238,7 @@ vbus_pci_device_close(struct vbus_device_proxy *vdev, int flags)
 		_signal = list_first_entry(&dev->shms, struct _signal, list);
 
 		list_del(&_signal->list);
+		shmsignal_disconnect(_signal);
 
 		spin_unlock_irqrestore(&vbus_pci.lock, iflags);
 		shm_signal_put(&_signal->signal);
@@ -262,6 +263,102 @@ vbus_pci_device_close(struct vbus_device_proxy *vdev, int flags)
 
 	return 0;
 }
+
+/*
+ * -------------------
+ * shmsignal interrupt routines
+ * -------------------
+ */
+
+#ifdef CONFIG_HAVE_CREATE_IRQ
+
+static void vbus_irq_chip_noop(struct irq_data *data)
+{
+}
+
+static struct irq_chip vbus_irq_chip = {
+	.name		= "VBUS",
+	.irq_mask	= vbus_irq_chip_noop,
+	.irq_unmask	= vbus_irq_chip_noop,
+	.irq_eoi	= vbus_irq_chip_noop,
+};
+
+irqreturn_t
+shmsignal_intr(int irq, void *dev)
+{
+	struct _signal *_signal = (struct _signal *)dev;
+
+	_shm_signal_wakeup(&_signal->signal);
+
+	return IRQ_HANDLED;
+}
+
+static void
+shmsignal_wakeup(struct _signal *_signal)
+{
+	struct irq_desc *desc = _signal->desc;
+
+	desc->handle_irq(_signal->irq, desc);
+}
+
+static int
+shmsignal_connect(struct _signal *_signal)
+{
+	int ret;
+	int irq;
+
+	irq = create_irq();
+	if (irq < 0) {
+		printk(KERN_ERR "Failed to create IRQ: %d\n", irq);
+		return -ENOSPC;
+	}
+
+	_signal->irq = irq;
+	_signal->desc = irq_to_desc(irq);
+
+	irq_set_chip_and_handler_name(irq,
+				      &vbus_irq_chip,
+				      handle_percpu_irq,
+				      "edge");
+
+	ret = request_irq(irq, shmsignal_intr, 0,
+			  _signal->name, _signal);
+	if (ret)
+		printk(KERN_ERR "Failed to request irq: %d\n", irq);
+
+	return ret;
+}
+
+static void
+shmsignal_disconnect(struct _signal *_signal)
+{
+	free_irq(_signal->irq, _signal);
+	destroy_irq(_signal->irq);
+}
+
+#else /* CONFIG_HAVE_CREATE_IRQ */
+
+/* These variants do not express the shmsignal as a linux interrupt */
+
+static void
+shmsignal_wakeup(struct _signal *_signal)
+{
+	_shm_signal_wakeup(&_signal->signal);
+}
+
+static int
+shmsignal_connect(struct _signal *_signal)
+{
+	return 0;
+}
+
+static void
+shmsignal_disconnect(struct _signal *_signal)
+{
+
+}
+
+#endif /* CONFIG_HAVE_CREATE_IRQ */
 
 static int
 vbus_pci_device_shm(struct vbus_device_proxy *vdev, const char *name,
@@ -317,28 +414,26 @@ vbus_pci_device_shm(struct vbus_device_proxy *vdev, const char *name,
 
 	ret = vbus_pci_buscall(VBUS_PCI_HC_DEVSHM,
 				 &params, sizeof(params));
-	if (ret < 0) {
-		if (_signal) {
-			/*
-			 * We held two references above, so we need to drop
-			 * both of them
-			 */
-			shm_signal_put(&_signal->signal);
-			shm_signal_put(&_signal->signal);
-		}
-
-		return ret;
-	}
+	if (ret < 0)
+		goto fail;
 
 	if (signal) {
+
 		BUG_ON(ret < 0);
 
 		_signal->handle = ret;
 
+		if (!name)
+			snprintf(_signal->name, sizeof(_signal->name),
+				 "dev%lld-id%d", vdev->id, id);
+		else
+			snprintf(_signal->name, sizeof(_signal->name),
+				 "%s", name);
+
+		shmsignal_connect(_signal);
+
 		spin_lock_irqsave(&vbus_pci.lock, iflags);
-
 		list_add_tail(&_signal->list, &dev->shms);
-
 		spin_unlock_irqrestore(&vbus_pci.lock, iflags);
 
 		shm_signal_get(&_signal->signal);
@@ -346,6 +441,18 @@ vbus_pci_device_shm(struct vbus_device_proxy *vdev, const char *name,
 	}
 
 	return 0;
+
+fail:
+	if (_signal) {
+		/*
+		 * We held two references above, so we need to drop
+		 * both of them
+		 */
+		shm_signal_put(&_signal->signal);
+		shm_signal_put(&_signal->signal);
+	}
+
+	return ret;
 }
 
 static int
@@ -458,8 +565,8 @@ event_shmsignal(struct vbus_pci_handle_event *event)
 	struct _signal *_signal = (struct _signal *)event->handle;
 
 	vbus_pci.stats.notify++;
-	_signal->stats.notify++;
-	_shm_signal_wakeup(&_signal->signal);
+
+	shmsignal_wakeup(_signal);
 }
 
 static void
