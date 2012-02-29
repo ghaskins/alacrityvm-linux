@@ -27,6 +27,7 @@
 
 #include <linux/device.h>
 #include <linux/shm_signal.h>
+#include <linux/ioq.h>
 
 struct vbus_device_proxy;
 struct vbus_driver;
@@ -71,6 +72,12 @@ struct vbus_driver {
 
 int vbus_driver_register(struct vbus_driver *drv);
 void vbus_driver_unregister(struct vbus_driver *drv);
+
+/*
+ * driver-side IOQ helper - allocates device-shm and maps an IOQ on it
+ */
+int vbus_driver_ioq_alloc(struct vbus_device_proxy *dev, const char *name,
+			  int id, int prio, size_t ringsize, struct ioq **ioq);
 
 #define VBUS_DRIVER_AUTOPROBE(name) MODULE_ALIAS("vbus-proxy:" name)
 
