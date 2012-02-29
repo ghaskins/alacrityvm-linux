@@ -176,6 +176,34 @@ int kvm_set_irq(struct kvm *kvm, int irq_source_id, u32 irq, int level)
 	return ret;
 }
 
+int kvm_irq_check_lockless(struct kvm *kvm, u32 irq)
+{
+	struct kvm_kernel_irq_routing_entry *e;
+	struct kvm_irq_routing_table *irq_rt;
+	struct hlist_node *n;
+	int ret = -ENOENT;
+
+	rcu_read_lock();
+	irq_rt = rcu_dereference(kvm->irq_routing);
+	if (irq < irq_rt->nr_rt_entries)
+		hlist_for_each_entry(e, n, &irq_rt->map[irq], link) {
+			if (!e->lockless) {
+				/*
+				 * all destinations need to be lockless to
+				 * declare that the GSI as a whole is also
+				 * lockless
+				 */
+				ret = 0;
+				break;
+			}
+
+			ret = 1;
+		}
+	rcu_read_unlock();
+
+	return ret;
+}
+
 void kvm_notify_acked_irq(struct kvm *kvm, unsigned irqchip, unsigned pin)
 {
 	struct kvm_irq_ack_notifier *kian;
@@ -311,18 +339,22 @@ static int setup_routing_entry(struct kvm_irq_routing_table *rt,
 	unsigned max_pin;
 	struct kvm_kernel_irq_routing_entry *ei;
 	struct hlist_node *n;
+	bool lockless = ue->type == KVM_IRQ_ROUTING_MSI;
 
 	/*
 	 * Do not allow GSI to be mapped to the same irqchip more than once.
 	 * Allow only one to one mapping between GSI and MSI.
+	 * Do not allow mixed lockless vs locked variants to coexist.
 	 */
 	hlist_for_each_entry(ei, n, &rt->map[ue->gsi], link)
 		if (ei->type == KVM_IRQ_ROUTING_MSI ||
-		    ue->u.irqchip.irqchip == ei->irqchip.irqchip)
+		    ue->u.irqchip.irqchip == ei->irqchip.irqchip ||
+		    ei->lockless != lockless)
 			return r;
 
 	e->gsi = ue->gsi;
 	e->type = ue->type;
+	e->lockless = lockless;
 	switch (ue->type) {
 	case KVM_IRQ_ROUTING_IRQCHIP:
 		delta = 0;
