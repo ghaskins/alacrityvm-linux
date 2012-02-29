@@ -592,11 +592,12 @@ void macvlan_common_setup(struct net_device *dev)
 }
 EXPORT_SYMBOL_GPL(macvlan_common_setup);
 
-static void macvlan_setup(struct net_device *dev)
+void macvlan_setup(struct net_device *dev)
 {
 	macvlan_common_setup(dev);
 	dev->tx_queue_len	= 0;
 }
+EXPORT_SYMBOL_GPL(macvlan_setup);
 
 static int macvlan_port_create(struct net_device *dev)
 {
@@ -634,7 +635,7 @@ static void macvlan_port_destroy(struct net_device *dev)
 	kfree_rcu(port, rcu);
 }
 
-static int macvlan_validate(struct nlattr *tb[], struct nlattr *data[])
+int macvlan_validate(struct nlattr *tb[], struct nlattr *data[])
 {
 	if (tb[IFLA_ADDRESS]) {
 		if (nla_len(tb[IFLA_ADDRESS]) != ETH_ALEN)
@@ -656,6 +657,7 @@ static int macvlan_validate(struct nlattr *tb[], struct nlattr *data[])
 	}
 	return 0;
 }
+EXPORT_SYMBOL_GPL(macvlan_validate);
 
 int macvlan_common_newlink(struct net *src_net, struct net_device *dev,
 			   struct nlattr *tb[], struct nlattr *data[],
