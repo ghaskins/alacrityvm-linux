@@ -30,3 +30,14 @@ menuconfig VBUS_CONNECTORS
 	unsure, say N
 
 source "kernel/vbus/connectors/Kconfig"
+
+menuconfig VBUS_DEVICES
+       bool "Virtual-Bus Devices"
+       depends on VBUS
+       default n
+       help
+         Provides device-class modules for instantiation on a virtual-bus
+
+	 If unsure, say N
+
+source "kernel/vbus/devices/Kconfig"
