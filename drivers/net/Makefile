@@ -20,6 +20,7 @@ obj-$(CONFIG_RIONET) += rionet.o
 obj-$(CONFIG_TUN) += tun.o
 obj-$(CONFIG_VETH) += veth.o
 obj-$(CONFIG_VIRTIO_NET) += virtio_net.o
+obj-$(CONFIG_VBUS_ENET) += vbus-enet.o
 
 #
 # Networking Drivers
