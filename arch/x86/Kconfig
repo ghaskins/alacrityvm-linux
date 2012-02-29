@@ -2101,6 +2101,8 @@ source "drivers/pcmcia/Kconfig"
 
 source "drivers/pci/hotplug/Kconfig"
 
+source "drivers/vbus/Kconfig"
+
 config RAPIDIO
 	bool "RapidIO support"
 	depends on PCI
