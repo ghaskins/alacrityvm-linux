@@ -91,7 +91,7 @@ struct guest_device {
 	struct vbus_device_proxy dev;
 };
 
-struct guest_device *
+static struct guest_device *
 to_dev(struct vbus_device_proxy *dev)
 {
 	return container_of(dev, struct guest_device, dev);

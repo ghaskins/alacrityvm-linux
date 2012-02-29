@@ -125,7 +125,7 @@ vbus_pci_buscall(unsigned long nr, void *data, unsigned long len)
 	return ret;
 }
 
-struct vbus_pci_device *
+static struct vbus_pci_device *
 to_dev(struct vbus_device_proxy *vdev)
 {
 	return container_of(vdev, struct vbus_pci_device, vdev);
