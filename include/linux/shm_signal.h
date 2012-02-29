@@ -58,6 +58,9 @@ struct shm_signal_desc {
 #ifdef __KERNEL__
 
 #include <linux/kref.h>
+#include <linux/wait.h>
+#include <linux/poll.h>
+#include <linux/file.h>
 #include <linux/interrupt.h>
 
 struct shm_signal_notifier {

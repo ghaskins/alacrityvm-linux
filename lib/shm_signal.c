@@ -24,6 +24,7 @@
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/shm_signal.h>
+#include <linux/workqueue.h>
 
 MODULE_AUTHOR("Gregory Haskins");
 MODULE_LICENSE("GPL");
@@ -195,3 +196,4 @@ void shm_signal_init(struct shm_signal *s, enum shm_signal_locality locale,
 	s->desc     = desc;
 }
 EXPORT_SYMBOL_GPL(shm_signal_init);
+
