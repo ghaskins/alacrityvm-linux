@@ -143,6 +143,11 @@ int venetdev_netdev_ioctl(struct net_device *dev, struct ifreq *rq,
 						   int cmd);
 struct net_device_stats *venetdev_netdev_stats(struct net_device *dev);
 
+int venetdev_open(struct venetdev *dev);
+int venetdev_stop(struct venetdev *dev);
+int venetdev_xmit(struct sk_buff *skb, struct venetdev *dev);
+struct net_device_stats *venetdev_get_stats(struct venetdev *dev);
+
 static inline void venetdev_netdev_unregister(struct venetdev *priv)
 {
 	if (priv->netif.enabled) {

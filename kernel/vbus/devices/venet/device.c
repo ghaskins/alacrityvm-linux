@@ -229,9 +229,8 @@ venetdev_txq_notify_dec(struct venetdev *priv)
  */
 
 int
-venetdev_netdev_open(struct net_device *dev)
+venetdev_open(struct venetdev *priv)
 {
-	struct venetdev *priv = netdev_priv(dev);
 	unsigned long flags;
 
 	BUG_ON(priv->netif.link);
@@ -261,7 +260,7 @@ venetdev_netdev_open(struct net_device *dev)
 	priv->netif.link = true;
 
 	if (!priv->vbus.link)
-		netif_carrier_off(dev);
+		netif_carrier_off(priv->netif.dev);
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 
@@ -269,9 +268,16 @@ venetdev_netdev_open(struct net_device *dev)
 }
 
 int
-venetdev_netdev_stop(struct net_device *dev)
+venetdev_netdev_open(struct net_device *dev)
 {
 	struct venetdev *priv = netdev_priv(dev);
+
+	return venetdev_open(priv);
+}
+
+int
+venetdev_stop(struct venetdev *priv)
+{
 	unsigned long flags;
 	int needs_stop = false;
 
@@ -295,6 +301,14 @@ venetdev_netdev_stop(struct net_device *dev)
 	}
 
 	return 0;
+}
+
+int
+venetdev_netdev_stop(struct net_device *dev)
+{
+	struct venetdev *priv = netdev_priv(dev);
+
+	return venetdev_stop(priv);
 }
 
 /*
@@ -1543,10 +1557,10 @@ venetdev_apply_backpressure(struct venetdev *priv)
  * the netif flow control is still managed by the actual consumer,
  * thereby avoiding the creation of an extra servo-loop to the equation.
  */
+
 int
-venetdev_netdev_tx(struct sk_buff *skb, struct net_device *dev)
+venetdev_xmit(struct sk_buff *skb, struct venetdev *priv)
 {
-	struct venetdev *priv = netdev_priv(dev);
 	struct ioq      *ioq = NULL;
 	unsigned long    flags;
 
@@ -1587,6 +1601,15 @@ flowcontrol:
 	return NETDEV_TX_BUSY;
 }
 
+int
+venetdev_netdev_tx(struct sk_buff *skb, struct net_device *dev)
+{
+	struct venetdev *priv = netdev_priv(dev);
+
+	return venetdev_xmit(skb, priv);
+}
+
+
 /*
  * Ioctl commands
  */
@@ -1601,10 +1624,16 @@ venetdev_netdev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
  * Return statistics to the caller
  */
 struct net_device_stats *
+venetdev_get_stats(struct venetdev *priv)
+{
+	return &priv->netif.stats;
+}
+
+struct net_device_stats *
 venetdev_netdev_stats(struct net_device *dev)
 {
 	struct venetdev *priv = netdev_priv(dev);
-	return &priv->netif.stats;
+	return venetdev_get_stats(priv);
 }
 
 /*
