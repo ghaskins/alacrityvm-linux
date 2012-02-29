@@ -16,3 +16,16 @@ config VBUS
 
 	If you plan on using this kernel as a VBUS backend, say Y.  If
 	unsure, say N
+
+menuconfig VBUS_CONNECTORS
+       bool "Virtual-Bus Connectors"
+       depends on VBUS
+       default n
+       help
+        Connectors bridge a vbus container to an environment, such
+	as a hypervisor or userspace.
+
+	If you plan on using this kernel as a VBUS backend, say Y.  If
+	unsure, say N
+
+source "kernel/vbus/connectors/Kconfig"

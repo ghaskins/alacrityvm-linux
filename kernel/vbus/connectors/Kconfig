@@ -1,0 +1,10 @@
+
+config VBUS_NULL
+       tristate "Virtual-Bus NULL connector"
+       depends on VBUS_CONNECTORS
+       default n
+       help
+         Provides a example connector
+
+	 If unsure, say N
+
