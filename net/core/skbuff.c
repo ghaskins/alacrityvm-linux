@@ -223,6 +223,8 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	memset(shinfo, 0, offsetof(struct skb_shared_info, dataref));
 	atomic_set(&shinfo->dataref, 1);
 	kmemcheck_annotate_variable(shinfo->destructor_arg);
+	shinfo->release = NULL;
+	shinfo->priv = NULL;
 
 	if (fclone) {
 		struct sk_buff *child = skb + 1;
@@ -354,6 +356,9 @@ static void skb_release_data(struct sk_buff *skb)
 
 		if (skb_has_frag_list(skb))
 			skb_drop_fraglist(skb);
+
+		if (skb_shinfo(skb)->release)
+			skb_shinfo(skb)->release(skb);
 
 		kfree(skb->head);
 	}
@@ -502,6 +507,8 @@ void skb_recycle(struct sk_buff *skb)
 	shinfo = skb_shinfo(skb);
 	memset(shinfo, 0, offsetof(struct skb_shared_info, dataref));
 	atomic_set(&shinfo->dataref, 1);
+	shinfo->release = NULL;
+	shinfo->priv = NULL;
 
 	memset(skb, 0, offsetof(struct sk_buff, tail));
 	skb->data = skb->head + NET_SKB_PAD;
@@ -956,6 +963,8 @@ adjust_others:
 	skb->hdr_len  = 0;
 	skb->nohdr    = 0;
 	atomic_set(&skb_shinfo(skb)->dataref, 1);
+	skb_shinfo(skb)->release = NULL;
+	skb_shinfo(skb)->priv = NULL;
 	return 0;
 
 nofrags:
