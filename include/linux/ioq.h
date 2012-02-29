@@ -53,18 +53,18 @@
  */
 struct ioq_ring_desc {
 	aligned_u64           cookie; /* for arbitrary use by north-side */
-	aligned_u64           ptr;
-	aligned_u64           len;
+	aligned_le64          ptr;
+	aligned_le64          len;
 	__u8                  valid;
 	__u8                  sown; /* South owned = 1, North owned = 0 */
 };
 
-#define IOQ_RING_MAGIC 0x47fa2fe4
-#define IOQ_RING_VER   4
+#define IOQ_RING_MAGIC cpu_to_le32(0x47fa2fe4)
+#define IOQ_RING_VER   cpu_to_le32(4)
 
 struct ioq_ring_idx {
-	__u32                 head;    /* 0 based index to head of ptr array */
-	__u32                 tail;    /* 0 based index to tail of ptr array */
+	__le32                head;    /* 0 based index to head of ptr array */
+	__le32                tail;    /* 0 based index to tail of ptr array */
 	__u8                  full;
 };
 
@@ -74,11 +74,11 @@ enum ioq_locality {
 };
 
 struct ioq_ring_head {
-	__u32                  magic;
-	__u32                  ver;
+	__le32                 magic;
+	__le32                 ver;
 	struct shm_signal_desc signal;
 	struct ioq_ring_idx    idx[2];
-	__u32                  count;
+	__le32                 count;
 	struct ioq_ring_desc   ring[1]; /* "count" elements will be allocated */
 };
 
