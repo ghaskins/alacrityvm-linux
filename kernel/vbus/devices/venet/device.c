@@ -786,6 +786,13 @@ venetdev_sg_import(struct venetdev *priv, void *ptr, int len)
 		return NULL;
 	}
 
+	if (vsg->phdr.mac == ~0U || vsg->phdr.mac == 0)
+		PDEBUG("mac header invalid!!!\n");
+
+	skb_reset_mac_header(skb);
+	skb_set_network_header(skb, vsg->phdr.network);
+	skb_set_transport_header(skb, vsg->phdr.transport);
+
 	if (vsg->flags & VENET_SG_FLAG_GSO) {
 		struct skb_shared_info *sinfo = skb_shinfo(skb);
 
@@ -2080,7 +2087,7 @@ venetdev_flushrx(struct venetdev *priv)
 	return 0;
 }
 
-void venetdev_init(struct venetdev *device, struct net_device *dev)
+void venetdev_common_init(struct venetdev *device)
 {
 	INIT_LIST_HEAD(&device->vbus.evq.txclist);
 	device->vbus.import      = &venetdev_flat_import;
@@ -2100,8 +2107,12 @@ void venetdev_init(struct venetdev *device, struct net_device *dev)
 	device->netif.rxq.completed = 0;
 	init_waitqueue_head(&device->netif.rxq.wq);
 
-	device->netif.dev = dev;
 	device->netif.out = venetdev_out;
+}
+
+void venetdev_dev_init(struct venetdev *device, struct net_device *dev)
+{
+	device->netif.dev = dev;
 
 	ether_setup(dev); /* assign some of the fields */
 
@@ -2339,7 +2350,7 @@ host_mac_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 struct vbus_device_attribute attr_hmac =
 	__ATTR_RO(host_mac);
 
-static ssize_t
+ssize_t
 cmac_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	      const char *buf, size_t count)
 {
@@ -2371,7 +2382,7 @@ cmac_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	return count;
 }
 
-static ssize_t
+ssize_t
 client_mac_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	 char *buf)
 {
@@ -2383,7 +2394,7 @@ client_mac_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 struct vbus_device_attribute attr_cmac =
 	__ATTR(client_mac, S_IRUGO | S_IWUSR, client_mac_show, cmac_store);
 
-static ssize_t
+ssize_t
 enabled_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	 char *buf)
 {
@@ -2392,7 +2403,7 @@ enabled_show(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	return snprintf(buf, PAGE_SIZE, "%d\n", priv->netif.enabled);
 }
 
-static ssize_t
+ssize_t
 enabled_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	      const char *buf, size_t count)
 {
@@ -2406,8 +2417,13 @@ enabled_store(struct vbus_device *dev, struct vbus_device_attribute *attr,
 	if (enabled != 0 && enabled != 1)
 		return -EINVAL;
 
-	if (enabled && !priv->netif.enabled)
+	if (enabled && !priv->netif.enabled) {
+		/* need to un-initialize certain fields of the
+		   net_device so that it may be re-registered */
+		priv->netif.dev->reg_state = NETREG_UNINITIALIZED;
+		priv->netif.dev->dev.kobj.state_initialized = 0;
 		ret = register_netdev(priv->netif.dev);
+	}
 
 	if (!enabled && priv->netif.enabled)
 		venetdev_netdev_unregister(priv);

@@ -152,7 +152,7 @@ struct net_device_stats *venetdev_get_stats(struct venetdev *dev);
 static inline void venetdev_netdev_unregister(struct venetdev *priv)
 {
 	if (priv->netif.enabled) {
-		venetdev_netdev_stop(priv->netif.dev);
+		venetdev_stop(priv);
 		unregister_netdev(priv->netif.dev);
 	}
 }
@@ -165,7 +165,8 @@ int venetdev_vlink_shm(struct vbus_connection *conn,
 		   struct shm_signal *signal, unsigned long flags);
 void  venetdev_vlink_release(struct vbus_connection *conn);
 void  venetdev_vlink_close(struct vbus_connection *conn);
-void venetdev_init(struct venetdev *vdev, struct net_device *dev);
+void venetdev_common_init(struct venetdev *vdev);
+void venetdev_dev_init(struct venetdev *vdev, struct net_device *dev);
 
 extern struct vbus_device_attribute attr_cmac;
 extern struct vbus_device_attribute attr_hmac;
@@ -174,5 +175,17 @@ extern struct vbus_device_attribute attr_burstthresh;
 extern struct vbus_device_attribute attr_ifname;
 extern struct vbus_device_attribute attr_txmitigation;
 extern struct vbus_device_attribute attr_zcthresh;
+
+ssize_t enabled_store(struct vbus_device *dev,
+		struct vbus_device_attribute *attr,
+		 const char *buf, size_t count);
+ssize_t enabled_show(struct vbus_device *dev,
+			struct vbus_device_attribute *attr, char *buf);
+ssize_t cmac_store(struct vbus_device *dev,
+		struct vbus_device_attribute *attr,
+		 const char *buf, size_t count);
+ssize_t client_mac_show(struct vbus_device *dev,
+			struct vbus_device_attribute *attr, char *buf);
+
 
 #endif

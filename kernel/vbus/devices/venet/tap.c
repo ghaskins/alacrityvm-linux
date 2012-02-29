@@ -259,7 +259,8 @@ venettap_device_create(struct vbus_devclass *dc,
 	_vdev->ops             = &venettap_device_ops;
 	_vdev->attrs           = &venettap_attr_group;
 
-	venetdev_init(priv, dev);
+	venetdev_common_init(priv);
+	venetdev_dev_init(priv, dev);
 
 	dev->netdev_ops = &venettap_netdev_ops;
 

@@ -1,7 +1,7 @@
-venet-device-objs += device.o
-ifneq ($(CONFIG_VBUS_VENETTAP),n)
-venet-device-objs += tap.o
-endif
+venet-tap-objs := device.o tap.o
+venet-macvlan-objs := device.o macvlan.o
 
-obj-$(CONFIG_VBUS_VENETDEV) += venet-device.o
+obj-$(CONFIG_VBUS_VENETTAP) += venet-tap.o
+obj-$(CONFIG_VBUS_VENETMACV) += venet-macvlan.o
+
 
