@@ -38,7 +38,7 @@ struct _eventq {
 		struct kvm_xvmap *xvmap;
 	} ringdata;
 	struct work_struct  wakeup;
-	int                 backpressure:1;
+	bool                backpressure;
 };
 
 enum _state {
@@ -231,7 +231,7 @@ static struct vbus_memctx_ops _memctx_ops = {
 	.release   = &_memctx_release,
 };
 
-struct vbus_memctx *_memctx_alloc(struct vbus_kvm *vkvm)
+static struct vbus_memctx *_memctx_alloc(struct vbus_kvm *vkvm)
 {
 	struct _memctx *_memctx;
 
@@ -399,7 +399,7 @@ events_flush(struct _eventq *eventq)
 		if (iter.desc->len < sizeof(*ev)) {
 			SHM_SIGNAL_FAULT(eventq->ioq->signal,
 					 "Desc too small on eventq: " \
-					 "%p: %ld<%ld",
+					 "%p: %ld<%zu",
 					 (void *)iter.desc->ptr,
 					 (unsigned long)iter.desc->len,
 					 sizeof(*ev));
