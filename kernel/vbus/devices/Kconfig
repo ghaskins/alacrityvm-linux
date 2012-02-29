@@ -1,3 +1,4 @@
 
 source "kernel/vbus/devices/venet/Kconfig"
+source "kernel/vbus/devices/ibswitch/Kconfig"
 
