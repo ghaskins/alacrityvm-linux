@@ -12,6 +12,16 @@
 
 struct kvm_xinterface;
 struct kvm_xvmap;
+struct kvm_xioevent;
+
+enum {
+	kvm_xioevent_flag_nr_pio,
+	kvm_xioevent_flag_nr_max,
+};
+
+#define KVM_XIOEVENT_FLAG_PIO       (1 << kvm_xioevent_flag_nr_pio)
+
+#define KVM_XIOEVENT_VALID_FLAG_MASK  ((1 << kvm_xioevent_flag_nr_max) - 1)
 
 struct kvm_xinterface_ops {
 	unsigned long (*copy_to)(struct kvm_xinterface *intf,
@@ -22,6 +32,10 @@ struct kvm_xinterface_ops {
 	struct kvm_xvmap* (*vmap)(struct kvm_xinterface *intf,
 				  unsigned long gpa,
 				  unsigned long len);
+	struct kvm_xioevent* (*ioevent)(struct kvm_xinterface *intf,
+					u64 addr,
+					unsigned long len,
+					unsigned long flags);
 	void (*release)(struct kvm_xinterface *);
 };
 
@@ -107,6 +121,39 @@ static inline void
 kvm_xvmap_put(struct kvm_xvmap *vmap)
 {
 	kref_put(&vmap->kref, _kvm_xvmap_release);
+}
+
+struct kvm_xioevent_ops {
+	void (*deassign)(struct kvm_xioevent *ioevent);
+};
+
+struct kvm_xioevent {
+	const struct kvm_xioevent_ops *ops;
+	struct kvm_xinterface         *intf;
+	void (*signal)(struct kvm_xioevent *ioevent, const void *val);
+	void                          *priv;
+};
+
+static inline void
+kvm_xioevent_init(struct kvm_xioevent *ioevent,
+		  const struct kvm_xioevent_ops *ops,
+		  struct kvm_xinterface *intf)
+{
+	memset(ioevent, 0, sizeof(vmap));
+	ioevent->ops = ops;
+	ioevent->intf = intf;
+
+	kvm_xinterface_get(intf);
+}
+
+static inline void
+kvm_xioevent_deassign(struct kvm_xioevent *ioevent)
+{
+	struct kvm_xinterface *intf = ioevent->intf;
+	rmb();
+
+	ioevent->ops->deassign(ioevent);
+	kvm_xinterface_put(intf);
 }
 
 struct kvm_xinterface *kvm_xinterface_bind(int fd);
