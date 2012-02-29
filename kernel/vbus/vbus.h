@@ -53,6 +53,7 @@ struct vbus {
 	struct vbus_subdir members;
 	unsigned long next_id;
 	struct rb_node node;
+	struct raw_notifier_head notifier;
 };
 
 struct vbus_member {
