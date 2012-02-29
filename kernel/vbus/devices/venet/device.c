@@ -1230,7 +1230,7 @@ sg_txstream_write(struct venet_txstream *str, const void *src, unsigned long len
 
 	while (len) {
 		struct venet_iov *iov         = &vsg->iov[_str->index];
-		int               bytestocopy = min(len, _str->remain);
+		int               bytestocopy = min_t(size_t, len, _str->remain);
 
 		if (!bytestocopy) {
 			sg_txstream_replenish(_str);

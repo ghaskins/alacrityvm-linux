@@ -207,7 +207,7 @@ out:
 	return ret;
 }
 
-static ssize_t
+static long
 vbus_admin_chardev_ioctl(struct file *filp, unsigned int ioctl,
 			 unsigned long arg)
 {

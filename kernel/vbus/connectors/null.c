@@ -123,10 +123,10 @@ guest_device_close(struct vbus_device_proxy *dev, int flags)
 }
 
 static int
-guest_device_shm(struct vbus_device_proxy *dev, int id, int prio,
-	       void *ptr, size_t len,
-	       struct shm_signal_desc *sdesc, struct shm_signal **signal,
-	       int flags)
+guest_device_shm(struct vbus_device_proxy *dev, const char *name, int id,
+		 int prio, void *ptr, size_t len,
+		 struct shm_signal_desc *sdesc, struct shm_signal **signal,
+		 int flags)
 {
 	struct guest_device *_dev = to_dev(dev);
 	struct guest_signal *_signal = NULL;
