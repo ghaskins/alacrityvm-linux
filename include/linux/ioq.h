@@ -114,9 +114,9 @@ struct ioq_iterator {
 	struct ioq_ring_idx   *idx;
 	u32                    pos;
 	struct ioq_ring_desc  *desc;
-	int                    update:1;
-	int                    dualidx:1;
-	int                    flipowner:1;
+	unsigned int           update:1;
+	unsigned int           dualidx:1;
+	unsigned int           flipowner:1;
 };
 
 struct ioq_notifier {
