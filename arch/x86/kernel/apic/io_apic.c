@@ -3096,6 +3096,7 @@ int create_irq(void)
 
 	return irq;
 }
+EXPORT_SYMBOL_GPL(create_irq);
 
 void destroy_irq(unsigned int irq)
 {
@@ -3111,6 +3112,7 @@ void destroy_irq(unsigned int irq)
 	raw_spin_unlock_irqrestore(&vector_lock, flags);
 	free_irq_at(irq, cfg);
 }
+EXPORT_SYMBOL_GPL(destroy_irq);
 
 /*
  * MSI message composition
