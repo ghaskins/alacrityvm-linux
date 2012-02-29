@@ -3540,6 +3540,12 @@ L:	linux-serial@vger.kernel.org
 S:	Maintained
 F:	drivers/tty/serial/ioc3_serial.c
 
+IOQ LIBRARY
+M:	Gregory Haskins <gregory.haskins@gmail.com>
+S:	Maintained
+F:	include/linux/ioq.h
+F:	lib/ioq.c
+
 IP MASQUERADING
 M:	Juanjo Ciarlante <jjciarla@raiz.uncu.edu.ar>
 S:	Maintained
