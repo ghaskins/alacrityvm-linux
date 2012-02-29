@@ -1,13 +1,13 @@
-
+#include <linux/module.h>
 #include <linux/errno.h>
-
-#include "map.h"
+#include <linux/map.h>
 
 void map_init(struct map *map, struct map_ops *ops)
 {
 	map->root = RB_ROOT;
 	map->ops = ops;
 }
+EXPORT_SYMBOL(map_init);
 
 int map_add(struct map *map, struct rb_node *node)
 {
@@ -43,6 +43,7 @@ int map_add(struct map *map, struct rb_node *node)
 
 	return ret;
 }
+EXPORT_SYMBOL(map_add);
 
 struct rb_node *map_find(struct map *map, const void *key)
 {
@@ -64,9 +65,11 @@ struct rb_node *map_find(struct map *map, const void *key)
 
 	return node;
 }
+EXPORT_SYMBOL(map_find);
 
 void map_del(struct map *map, struct rb_node *node)
 {
 	rb_erase(node, &map->root);
 }
+EXPORT_SYMBOL(map_del);
 

@@ -19,8 +19,8 @@
  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-#ifndef __VBUS_MAP_H__
-#define __VBUS_MAP_H__
+#ifndef __LINUX_MAP_H__
+#define __LINUX_MAP_H__
 
 #include <linux/rbtree.h>
 
@@ -34,9 +34,9 @@ struct map {
 	struct map_ops *ops;
 };
 
-void map_init(struct map *map, struct map_ops *ops);
-int map_add(struct map *map, struct rb_node *node);
-struct rb_node *map_find(struct map *map, const void *key);
-void map_del(struct map *map, struct rb_node *node);
+extern void map_init(struct map *map, struct map_ops *ops);
+extern int map_add(struct map *map, struct rb_node *node);
+extern struct rb_node *map_find(struct map *map, const void *key);
+extern void map_del(struct map *map, struct rb_node *node);
 
-#endif /* __VBUS_MAP_H__ */
+#endif /* __LINUX_MAP_H__ */
