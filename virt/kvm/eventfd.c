@@ -57,18 +57,32 @@ struct _irqfd {
 	struct list_head list;
 	poll_table pt;
 	struct work_struct shutdown;
+	void (*execute)(struct _irqfd *);
 };
 
 static struct workqueue_struct *irqfd_cleanup_wq;
 
 static void
-irqfd_inject(struct work_struct *work)
+irqfd_inject(struct _irqfd *irqfd)
 {
-	struct _irqfd *irqfd = container_of(work, struct _irqfd, inject);
 	struct kvm *kvm = irqfd->kvm;
 
 	kvm_set_irq(kvm, KVM_USERSPACE_IRQ_SOURCE_ID, irqfd->gsi, 1);
 	kvm_set_irq(kvm, KVM_USERSPACE_IRQ_SOURCE_ID, irqfd->gsi, 0);
+}
+
+static void
+irqfd_deferred_inject(struct work_struct *work)
+{
+	struct _irqfd *irqfd = container_of(work, struct _irqfd, inject);
+
+	irqfd_inject(irqfd);
+}
+
+static void
+irqfd_schedule(struct _irqfd *irqfd)
+{
+	schedule_work(&irqfd->inject);
 }
 
 /*
@@ -140,7 +154,7 @@ irqfd_wakeup(wait_queue_t *wait, unsigned mode, int sync, void *key)
 		if (irq)
 			kvm_set_msi(irq, kvm, KVM_USERSPACE_IRQ_SOURCE_ID, 1);
 		else
-			schedule_work(&irqfd->inject);
+			irqfd->execute(irqfd);
 		rcu_read_unlock();
 	}
 
@@ -214,7 +228,7 @@ kvm_irqfd_assign(struct kvm *kvm, int fd, int gsi)
 	irqfd->kvm = kvm;
 	irqfd->gsi = gsi;
 	INIT_LIST_HEAD(&irqfd->list);
-	INIT_WORK(&irqfd->inject, irqfd_inject);
+	INIT_WORK(&irqfd->inject, irqfd_deferred_inject);
 	INIT_WORK(&irqfd->shutdown, irqfd_shutdown);
 
 	file = eventfd_fget(fd);
@@ -257,6 +271,15 @@ kvm_irqfd_assign(struct kvm *kvm, int fd, int gsi)
 	events = file->f_op->poll(file, &irqfd->pt);
 
 	list_add_tail(&irqfd->list, &kvm->irqfds.items);
+
+	ret = kvm_irq_check_lockless(kvm, gsi);
+	if (ret < 0)
+		goto fail;
+
+	if (ret)
+		irqfd->execute = &irqfd_inject;
+	else
+		irqfd->execute = &irqfd_schedule;
 
 	/*
 	 * Check if there was an event already pending on the eventfd
