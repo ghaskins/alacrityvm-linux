@@ -381,6 +381,7 @@ header-y += uvcvideo.h
 header-y += v4l2-mediabus.h
 header-y += v4l2-subdev.h
 header-y += veth.h
+header-y += vbus_kvm.h
 header-y += vbus_pci.h
 header-y += venet.h
 header-y += vhost.h
