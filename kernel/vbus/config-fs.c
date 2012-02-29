@@ -66,7 +66,7 @@ device_bus_disconnect(struct config_item *src, struct config_item *target)
 	return ds->dev->ops->bus_disconnect(ds->dev, vbus);
 }
 
-struct configfs_item_operations bus_ops = {
+static struct configfs_item_operations bus_ops = {
 	.allow_link = device_bus_connect,
 	.drop_link = device_bus_disconnect,
 };
@@ -172,7 +172,7 @@ static ssize_t devshell_type_write(struct vbus_devshell *ds, const char *page,
 	return count;
 }
 
-DEVSHELL_ATTR(type, S_IRUGO | S_IWUSR, devshell_type_read,
+static DEVSHELL_ATTR(type, S_IRUGO | S_IWUSR, devshell_type_read,
 	    devshell_type_write);
 
 static struct configfs_attribute *devshell_attrs[] = {
@@ -266,10 +266,4 @@ out_unregister:
 
 	return ret;
 }
-
-void __exit vbus_config_exit(void)
-{
-	configfs_unregister_subsystem(&vbus_root.ci.subsys);
-}
-
 
